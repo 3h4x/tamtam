@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { launchPrWait } from '@/lib/pipeline/start-pr-wait';
+import { launchPrWait, resolvePrTarget } from '@/lib/pipeline/start-pr-wait';
 import { resolveProjectPath } from '@/lib/shared/project-data';
-import { exec } from '@/lib/shared/shell';
 
 type Body = {
   prNumber?: number;
@@ -28,26 +27,12 @@ export async function POST(
   if (!prRepo || !prUrl) {
     const projPath = resolveProjectPath(projectName);
     if (!projPath) return NextResponse.json({ error: 'project not found' }, { status: 404 });
-    const ghOut = await exec('gh', ['pr', 'view', String(prNumber), '--json', 'url,headRepositoryOwner,headRepository'], {
-      cwd: projPath,
-      timeout: 15000,
-    });
-    if (ghOut.exitCode !== 0) {
-      return NextResponse.json({ error: `gh pr view failed: ${ghOut.stderr || ghOut.stdout}` }, { status: 502 });
+    const resolved = await resolvePrTarget(projPath, prNumber);
+    if ('error' in resolved) {
+      return NextResponse.json({ error: resolved.error }, { status: 502 });
     }
-    try {
-      const parsed = JSON.parse(ghOut.stdout) as {
-        url?: string;
-        headRepositoryOwner?: { login?: string };
-        headRepository?: { name?: string };
-      };
-      prUrl ||= parsed.url;
-      if (!prRepo && parsed.headRepositoryOwner?.login && parsed.headRepository?.name) {
-        prRepo = `${parsed.headRepositoryOwner.login}/${parsed.headRepository.name}`;
-      }
-    } catch (err) {
-      return NextResponse.json({ error: `gh pr view parse: ${(err as Error).message}` }, { status: 502 });
-    }
+    prUrl ||= resolved.prUrl;
+    prRepo ||= resolved.prRepo;
   }
 
   if (!prRepo || !prUrl) {

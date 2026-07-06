@@ -6,8 +6,7 @@ import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { Header } from '@/components/Header'
 
-const { fetchRecommendationsSummaryMock, fetchInboxMock, usePathnameMock, useRouterMock } = vi.hoisted(() => ({
-  fetchRecommendationsSummaryMock: vi.fn(),
+const { fetchInboxMock, usePathnameMock, useRouterMock } = vi.hoisted(() => ({
   fetchInboxMock: vi.fn(),
   usePathnameMock: vi.fn(),
   useRouterMock: vi.fn(),
@@ -25,7 +24,6 @@ vi.mock('next/link', () => ({
 }))
 
 vi.mock('@/lib/client-api', () => ({
-  fetchRecommendationsSummary: fetchRecommendationsSummaryMock,
   fetchInbox: fetchInboxMock,
 }))
 
@@ -70,12 +68,11 @@ function renderHeader() {
 describe('Header', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    fetchRecommendationsSummaryMock.mockReset()
     fetchInboxMock.mockReset()
     fetchInboxMock.mockResolvedValue({ signals: [], counts: { red: 0, yellow: 0, green: 0, total: 0 } })
     usePathnameMock.mockReset()
     useRouterMock.mockReset()
-    usePathnameMock.mockReturnValue('/recommendations')
+    usePathnameMock.mockReturnValue('/inbox')
     useRouterMock.mockReturnValue({ replace: vi.fn(), refresh: vi.fn() })
   })
 
@@ -84,62 +81,62 @@ describe('Header', () => {
     document.body.innerHTML = ''
   })
 
-  it('shows the open recommendations chip and polls every 60 seconds', async () => {
-    fetchRecommendationsSummaryMock
-      .mockResolvedValueOnce({ openCount: 3, byProject: { alpha: 2, beta: 1 } })
-      .mockResolvedValueOnce({ openCount: 1, byProject: { beta: 1 } })
+  it('shows the urgent inbox chip and polls every 60 seconds', async () => {
+    fetchInboxMock
+      .mockResolvedValueOnce({ signals: [], counts: { red: 3, yellow: 0, green: 0, total: 3 } })
+      .mockResolvedValueOnce({ signals: [], counts: { red: 1, yellow: 0, green: 0, total: 1 } })
 
     const { container, unmount } = renderHeader()
 
     await vi.waitFor(() => {
-      expect(fetchRecommendationsSummaryMock).toHaveBeenCalledTimes(1)
-      expect(container.textContent).toContain('Recommendations')
-      expect(container.querySelector('[aria-label="3 open recommendations"]')).not.toBeNull()
+      expect(fetchInboxMock).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('Inbox')
+      expect(container.querySelector('[aria-label="3 urgent inbox signals"]')).not.toBeNull()
     })
 
     await vi.advanceTimersByTimeAsync(60_000)
 
     await vi.waitFor(() => {
-      expect(fetchRecommendationsSummaryMock).toHaveBeenCalledTimes(2)
-      expect(container.querySelector('[aria-label="1 open recommendation"]')).not.toBeNull()
+      expect(fetchInboxMock).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[aria-label="1 urgent inbox signal"]')).not.toBeNull()
     })
 
     unmount()
   })
 
   it('hides a previously shown chip when a later poll fails', async () => {
-    fetchRecommendationsSummaryMock
-      .mockResolvedValueOnce({ openCount: 3, byProject: { alpha: 2, beta: 1 } })
+    fetchInboxMock
+      .mockResolvedValueOnce({ signals: [], counts: { red: 3, yellow: 0, green: 0, total: 3 } })
       .mockRejectedValueOnce(new Error('boom'))
 
     const { container, unmount } = renderHeader()
 
     await vi.waitFor(() => {
-      expect(fetchRecommendationsSummaryMock).toHaveBeenCalledTimes(1)
-      expect(container.querySelector('[aria-label="3 open recommendations"]')).not.toBeNull()
+      expect(fetchInboxMock).toHaveBeenCalledTimes(1)
+      expect(container.querySelector('[aria-label="3 urgent inbox signals"]')).not.toBeNull()
     })
 
     await vi.advanceTimersByTimeAsync(60_000)
 
     await vi.waitFor(() => {
-      expect(fetchRecommendationsSummaryMock).toHaveBeenCalledTimes(2)
-      expect(container.querySelector('[aria-label*="open recommendation"]')).toBeNull()
+      expect(fetchInboxMock).toHaveBeenCalledTimes(2)
+      expect(container.querySelector('[aria-label*="urgent inbox signal"]')).toBeNull()
     })
 
     unmount()
   })
 
-  it('fails open when the summary request errors', async () => {
-    fetchRecommendationsSummaryMock.mockRejectedValue(new Error('boom'))
+  it('fails open when the inbox request errors', async () => {
+    fetchInboxMock.mockRejectedValue(new Error('boom'))
 
     const { container, unmount } = renderHeader()
 
     await vi.waitFor(() => {
-      expect(fetchRecommendationsSummaryMock).toHaveBeenCalledTimes(1)
-      expect(container.textContent).toContain('Recommendations')
+      expect(fetchInboxMock).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('Inbox')
     })
 
-    expect(container.querySelector('[aria-label*="open recommendation"]')).toBeNull()
+    expect(container.querySelector('[aria-label*="urgent inbox signal"]')).toBeNull()
 
     unmount()
   })

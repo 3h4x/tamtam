@@ -26,12 +26,22 @@ import {
 
 export const API_BASE = '/api/projects'
 
-export async function fetchProjects(): Promise<ProjectsResponse> {
-  const response = await fetch(`${API_BASE}`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch projects: ${response.statusText}`)
+export async function fetchProjects(opts: { force?: boolean } = {}): Promise<ProjectsResponse> {
+  // Deduped + short-TTL memo. The shell-level ProjectsProvider AND each page's
+  // own component (logs, skills, initiatives) both call this on mount, and it is
+  // backed by the heavy cross-repo git sweep (`fetchProjectData`) — so the raw
+  // duplicate hammered the single event-loop thread on every page load. Routing
+  // it through the shared GET cache collapses the concurrent/near-concurrent
+  // duplicates into ONE request. `force` (the provider's authoritative + post-
+  // mutation loads) bypasses the memo so a pause/resume/priority change is never
+  // read back stale; background polls use the memo. The server already SWR-caches
+  // the sweep for 10s, so a 2s client memo just avoids the redundant round-trip.
+  try {
+    return await cachedGet<ProjectsResponse>(API_BASE, { ttlMs: 2000, force: opts.force })
+  } catch (e) {
+    if (e instanceof CachedGetError) throw new Error(`Failed to fetch projects: ${e.statusText}`, { cause: e })
+    throw e
   }
-  return response.json()
 }
 
 export async function setPriority(

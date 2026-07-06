@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => {
     codeReviewerSkillRef: { value: '/nonexistent/code-reviewer.md' as string },
     existsSyncMock: vi.fn(),
     readFileSyncMock: vi.fn(),
+    resolveGhRepoMock: vi.fn(),
+    fetchPrReviewIssueContextMock: vi.fn(),
   };
 });
 
@@ -63,6 +65,12 @@ vi.mock('fs', () => ({
 vi.mock('@/lib/skills/tamtam-file-config', () => ({
   loadFileConfig: () => null,
 }));
+vi.mock('@/lib/github/repo', () => ({
+  resolveGhRepo: mocks.resolveGhRepoMock,
+}));
+vi.mock('@/lib/pipeline/pr-review-issue-context', () => ({
+  fetchPrReviewIssueContext: mocks.fetchPrReviewIssueContextMock,
+}));
 
 // Single top-level import — all tests share this resolved module graph.
 import { startPrReview } from '@/lib/pipeline/start-pr-review';
@@ -95,6 +103,9 @@ describe('startPrReview', () => {
     mocks.probeJobStatusMock.mockResolvedValue('done');
     mocks.getSettingsMock.mockReturnValue({ review_verdict_rules: 'Use LGTM / NEEDS ATTENTION / DO NOT SHIP.' });
     mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
+    // Default: no issue context injected (keeps existing prompt assertions intact).
+    mocks.resolveGhRepoMock.mockResolvedValue(null);
+    mocks.fetchPrReviewIssueContextMock.mockResolvedValue(null);
     mocks.createJobMock.mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,
@@ -103,6 +114,40 @@ describe('startPrReview', () => {
 
   afterEach(() => {
     vi.clearAllTimers();
+  });
+
+  it('injects linked-issue acceptance criteria and the verified-criteria contract when the PR closes an issue', async () => {
+    mocks.execMock.mockResolvedValueOnce(resp(0, 'diff --git a/foo.ts b/foo.ts'));
+    mocks.resolveGhRepoMock.mockResolvedValue('owner/repo');
+    mocks.fetchPrReviewIssueContextMock.mockResolvedValue({ issueNumber: 10, criteria: ['Add unit tests', 'Handle errors'] });
+
+    await startPrReview('proj', 42, 'Title', 'feat/42', 'main');
+
+    const prompt: string = mocks.startJobMock.mock.calls[0][2];
+    expect(prompt).toContain('issue #10');
+    expect(prompt).toContain('Add unit tests');
+    expect(prompt).toContain('Handle errors');
+    // The verified-criteria output contract must be appended so the reviewer emits
+    // a `## Verified criteria` section the completion hook can gate the merge on.
+    expect(prompt).toContain('## Verified criteria');
+    expect(prompt).toContain('<untrusted source="github_issue_acceptance_criteria">');
+    // Fetches criteria against the resolved repo + this PR number.
+    expect(mocks.fetchPrReviewIssueContextMock).toHaveBeenCalledWith('/path/to/proj', 'owner/repo', 42);
+    // Issue number stamped so post-merge DoD can target the issue.
+    const savedJob = mocks.updateJobMock.mock.calls[0][0];
+    expect(JSON.parse(savedJob.contextMeta)).toMatchObject({ sourceType: 'pr_review', prNumber: 42, issueNumber: 10 });
+  });
+
+  it('does not inject the verified-criteria contract when the PR has no linked issue', async () => {
+    mocks.execMock.mockResolvedValueOnce(resp(0, 'diff content'));
+    mocks.resolveGhRepoMock.mockResolvedValue('owner/repo');
+    mocks.fetchPrReviewIssueContextMock.mockResolvedValue(null);
+
+    await startPrReview('proj', 1, 'Title', 'feat/1', 'main');
+
+    const prompt: string = mocks.startJobMock.mock.calls[0][2];
+    expect(prompt).not.toContain('## Verified criteria');
+    expect(prompt).not.toContain('ACCEPTANCE CRITERIA');
   });
 
   it('returns 404 when project path cannot be resolved', async () => {
@@ -326,6 +371,8 @@ describe('loadReviewPrompt — skill file handling', () => {
     mocks.probeJobStatusMock.mockResolvedValue('done');
     mocks.getSettingsMock.mockReturnValue({ review_verdict_rules: 'VERDICT_RULES' });
     mocks.checkCliStartGateMock.mockResolvedValue({ ok: true, provider: 'claude' });
+    mocks.resolveGhRepoMock.mockResolvedValue(null);
+    mocks.fetchPrReviewIssueContextMock.mockResolvedValue(null);
     mocks.createJobMock.mockImplementation((project: string, kind: string) => ({
       id: `${project}-${kind}-id`, project, kind, pid: 0, logPath: '',
       prompt: null, startedAt: 0, finishedAt: null, exitCode: null, seen: false,

@@ -181,11 +181,18 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       // the already-downgraded value and writes the same value a second time.
       if (earlyVerdict) persistVerdict(job.id, earlyVerdict);
     }
-    // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix
+    // Release pipeline: review LGTM → push; NEEDS ATTENTION/DO NOT SHIP → fix.
+    // A read-only PR-diff review (sourceType 'pr_review') must NEVER enter this
+    // chain: it reviews the PR branch's diff but the working copy is on the
+    // default branch, so committing/pushing/fixing here operates on the wrong
+    // tree (historically a phantom no-op commit+push). PR reviews route to
+    // their own merge handoff below (maybeAutoMergeAfterPrReview), not here.
+    // Mirrors the pr_review guards already used for markReviewed (above) and
+    // the reviewed-ref (below).
     try {
       const inRelease = !!findLinkedActiveReleaseJob(job);
       const pipelineCfg = await getProjectPipelineConfig(job.project);
-      if (job.exitCode === 0 && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
+      if (job.exitCode === 0 && reviewSourceType(job) !== 'pr_review' && (inRelease || pipelineCfg.autoPushEnabled || pipelineCfg.autoCommitEnabled)) {
         // Treat a missing verdict as NEEDS ATTENTION rather than silently
         // finalizing as success. Models sometimes narrate a problem and
         // propose a fix without emitting the formal "Verdict: X" line —
@@ -349,6 +356,25 @@ async function runCompletionHooksInner(job: JobData): Promise<void> {
       }
     } catch (e) {
       console.log(`[release] review hook error for ${job.project}:`, e);
+    }
+
+    // Read-only PR-diff review: excluded from the working-copy commit/push chain
+    // above. A LGTM on an auto_pr_merge_enabled project instead drives the
+    // reviewed PR to merge through pr-wait (CI-green + risky-diff gated,
+    // trusted-author only). Fail-closed and best-effort — any decline just
+    // leaves the persisted verdict for the operator.
+    if (reviewSourceType(job) === 'pr_review' && job.exitCode === 0) {
+      try {
+        const { maybeAutoMergeAfterPrReview } = await import('@/lib/pipeline/pr-review-merge');
+        const r = await maybeAutoMergeAfterPrReview(job);
+        console.log(
+          r.launched
+            ? `[pr-review→pr-wait] started ${r.jobId} for ${job.project} after LGTM`
+            : `[pr-review→pr-wait] no auto-merge for ${job.project}: ${r.reason}`,
+        );
+      } catch (e) {
+        console.log(`[pr-review→pr-wait] error for ${job.project}:`, e);
+      }
     }
   }
 

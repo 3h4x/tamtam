@@ -1,6 +1,8 @@
 import type { JobInfo } from './types'
+import { cachedGet, invalidateGet, CachedGetError } from './request-cache'
 
 const JOBS_BASE = '/api/jobs'
+const NOTIFICATIONS_URL = `${JOBS_BASE}/notifications`
 
 export interface FetchJobsOptions {
   limit?: number
@@ -38,12 +40,23 @@ export async function fetchJobs(
   return response.json()
 }
 
-export async function fetchNotifications(): Promise<{ count: number; jobs: JobInfo[]; runningCount: number; runningJobs: JobInfo[] }> {
-  const response = await fetch(`${JOBS_BASE}/notifications`)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch notifications: ${response.statusText}`)
+export async function fetchNotifications(
+  opts: { force?: boolean } = {},
+): Promise<{ count: number; jobs: JobInfo[]; runningCount: number; runningJobs: JobInfo[] }> {
+  // Deduped + short-TTL memo. The notification bell lives in the global shell,
+  // so this fires on every page and re-fires across the mount/hydration churn —
+  // the ~17KB payload was the largest duplicated GET on a page load. Routing it
+  // through the shared cache collapses those near-concurrent duplicates into one
+  // request. The 5s poll cadence is longer than the 2s memo, so each poll still
+  // gets fresh data; only the mount-burst duplicates are shared. `markJobSeen` /
+  // `markNotificationsSeen` invalidate the memo so a seen action is reflected on
+  // the very next poll instead of after the memo expires.
+  try {
+    return await cachedGet(NOTIFICATIONS_URL, { ttlMs: 2000, force: opts.force })
+  } catch (e) {
+    if (e instanceof CachedGetError) throw new Error(`Failed to fetch notifications: ${e.statusText}`, { cause: e })
+    throw e
   }
-  return response.json()
 }
 
 export async function markJobSeen(jobId: string): Promise<{ status: string }> {
@@ -53,6 +66,8 @@ export async function markJobSeen(jobId: string): Promise<{ status: string }> {
   if (!response.ok) {
     throw new Error(`Failed to mark seen: ${response.statusText}`)
   }
+  // Drop the notifications memo so the next poll reflects the seen state.
+  invalidateGet(NOTIFICATIONS_URL)
   return response.json()
 }
 
@@ -63,6 +78,8 @@ export async function markNotificationsSeen(): Promise<{ status: string }> {
   if (!response.ok) {
     throw new Error(`Failed to mark seen: ${response.statusText}`)
   }
+  // Drop the notifications memo so the next poll reflects the cleared state.
+  invalidateGet(NOTIFICATIONS_URL)
   return response.json()
 }
 

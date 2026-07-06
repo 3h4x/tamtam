@@ -56,7 +56,12 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
     try {
       setError(null)
       setPending(true)
-      const data = await fetchProjects()
+      // Authoritative loads (initial mount + explicit refresh, incl. the refetch
+      // right after a pause/resume/priority mutation) force past the client memo
+      // so a just-changed project state is never read back stale. Background
+      // polls use the memo, which collapses the mount-time duplicate with each
+      // page's own fetchProjects() call.
+      const data = await fetchProjects({ force: mode !== 'poll' })
       if (mode === 'poll') {
         const startedBeforeLatestAuthoritative = requestSeq < latestAuthoritativeSeqRef.current
         if (startedBeforeLatestAuthoritative || authoritativeInFlightRef.current > 0) {

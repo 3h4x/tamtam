@@ -35,6 +35,18 @@ vi.mock('@/components/project-detail/AgentsStats', () => ({
   AgentsStats: ({ projectName }: { projectName: string }) => <div data-testid="agents-stats">{projectName}</div>,
 }))
 
+vi.mock('@/components/project-detail/PromptInsightsPanel', () => ({
+  PromptInsightsPanel: () => <div data-testid="prompt-insights" />,
+}))
+
+// The below-the-fold stats panels mount via useDeferredMount (requestIdleCallback,
+// setTimeout fallback). Run the idle callback synchronously so the deferred panels
+// appear once their effect flushes, without waiting on the 300ms timeout fallback.
+type IdleWindow = {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+  cancelIdleCallback?: (id: number) => void
+}
+
 vi.mock('@/lib/shared/format', () => ({
   formatAgo: (ts: number) => `ago:${ts}`,
 }))
@@ -129,13 +141,17 @@ function renderOverview(runningJobs: JobInfo[], runningParentLookup?: Map<string
 describe('OverviewTab active work', () => {
   beforeEach(() => {
     pushMock.mockReset()
+    ;(window as unknown as IdleWindow).requestIdleCallback = (cb) => { cb(); return 1 }
+    ;(window as unknown as IdleWindow).cancelIdleCallback = () => {}
   })
 
   afterEach(() => {
     document.body.innerHTML = ''
+    delete (window as unknown as IdleWindow).requestIdleCallback
+    delete (window as unknown as IdleWindow).cancelIdleCallback
   })
 
-  it('uses the shared run taxonomy for active chips and visible badges', () => {
+  it('uses the shared run taxonomy for active chips and visible badges', async () => {
     const runningJobs = [
       buildJob({ id: 'run-1', kind: 'run', started_at: 100, prompt: 'Investigate flaky tests' }),
       buildJob({ id: 'agent-1', kind: 'agent:cto', started_at: 101 }),
@@ -160,8 +176,10 @@ describe('OverviewTab active work', () => {
     expect(buttons.some((button) => button.textContent?.includes('pipeline'))).toBe(false)
     expect(buttons.some((button) => button.textContent?.includes('other'))).toBe(false)
     expect(container.textContent).toContain('+1 more running job')
-    expect(container.querySelector('[data-testid="pipeline-stats"]')?.textContent).toBe('acme/widgets')
-    expect(container.querySelector('[data-testid="agents-stats"]')?.textContent).toBe('acme/widgets')
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="pipeline-stats"]')?.textContent).toBe('acme/widgets')
+      expect(container.querySelector('[data-testid="agents-stats"]')?.textContent).toBe('acme/widgets')
+    })
 
     unmount()
   })

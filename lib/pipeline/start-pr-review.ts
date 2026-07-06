@@ -12,12 +12,15 @@ import { CODE_REVIEWER_SKILL } from '@/lib/skills/skills';
 import { withBasePrompt, getPermissionModeFlag, getSettings } from '@/lib/shared/config';
 import { wrapUntrusted, withUntrustedPreamble } from '@/lib/shared/untrusted';
 import { detectReviewFrameworks, filterReviewFrameworkSections, formatReviewFrameworksBlock } from './review-frameworks';
+import { resolveGhRepo } from '@/lib/github/repo';
+import { fetchPrReviewIssueContext } from '@/lib/pipeline/pr-review-issue-context';
+import { VERIFIED_CRITERIA_CONTRACT } from '@/lib/pipeline/review-contract';
 
 export type StartPrReviewResult =
   | { ok: true; jobId: string; pid: number; logPath: string }
   | { ok: false; status: number; detail: string };
 
-function loadReviewPrompt(projPath: string): string {
+function loadReviewPrompt(projPath: string, hasCriteria: boolean): string {
   let content = '';
   try {
     content = readFileSync(/*turbopackIgnore: true*/ CODE_REVIEWER_SKILL, 'utf-8');
@@ -40,12 +43,17 @@ function loadReviewPrompt(projPath: string): string {
     'Branch: {headRef} → {baseRef}\n\n' +
     'The diff is below. Review the changes thoroughly.\n\n' +
     '{diff}\n\n' +
+    // Injected only when the PR closes an issue with unchecked acceptance
+    // criteria — the review must judge the diff against the issue's DoD, not the
+    // diff in isolation. Empty otherwise.
+    (hasCriteria ? '{acceptanceCriteria}\n\n' : '') +
     'TAMTAM INTERNAL CONFIG CONTEXT:\n' +
     '- Ignore `.tamtam/` changes during review. They are TamTam scheduler/config metadata, not product code for this project.\n' +
     '- Do not raise findings about `.tamtam/agents/*.md`, `.tamtam/config.yml`, or other `.tamtam/` files unless the review task is explicitly about TamTam configuration.\n\n' +
     frameworkBlock + '\n\n' +
     'End with a verdict: LGTM / NEEDS ATTENTION / DO NOT SHIP\n\n' +
-    review_verdict_rules;
+    review_verdict_rules +
+    (hasCriteria ? '\n\n' + VERIFIED_CRITERIA_CONTRACT : '');
 }
 
 export async function startPrReview(
@@ -83,6 +91,24 @@ export async function startPrReview(
     return { ok: false, status: 400, detail: `No diff found for PR #${prNumber}` };
   }
 
+  // Pull the linked issue's acceptance criteria (DoD) so the review judges the
+  // PR against the issue's intent, not just the diff. Best-effort: any failure
+  // (no repo, no linked issue, no criteria) leaves the review diff-only.
+  let acceptanceCriteria = '';
+  let issueNumber: number | null = null;
+  const repo = await resolveGhRepo(projectName, projPath);
+  if (repo) {
+    const issueCtx = await fetchPrReviewIssueContext(projPath, repo, prNumber);
+    if (issueCtx) {
+      issueNumber = issueCtx.issueNumber;
+      const criteriaList = issueCtx.criteria.map((c) => `- [ ] ${c}`).join('\n');
+      acceptanceCriteria =
+        `LINKED ISSUE ACCEPTANCE CRITERIA (issue #${issueCtx.issueNumber}) — the PR must satisfy these; ` +
+        `verify each against the diff and the surrounding code, and reflect it in the required ## Verified criteria section:\n` +
+        wrapUntrusted(criteriaList, 'github_issue_acceptance_criteria');
+    }
+  }
+
   // Wrap external GitHub content so injected instructions can't hijack Claude.
   const substitutions: Record<string, string> = {
     '{project}': projectName,
@@ -92,8 +118,9 @@ export async function startPrReview(
     '{headRef}': wrapUntrusted(headRef, 'github_pr_ref'),
     '{baseRef}': wrapUntrusted(baseRef, 'github_pr_ref'),
     '{diff}': wrapUntrusted(diffR.stdout, 'github_pr_diff'),
+    '{acceptanceCriteria}': acceptanceCriteria,
   };
-  let rendered = loadReviewPrompt(projPath);
+  let rendered = loadReviewPrompt(projPath, acceptanceCriteria.length > 0);
   for (const [key, value] of Object.entries(substitutions)) {
     rendered = rendered.split(key).join(value);
   }
@@ -101,7 +128,13 @@ export async function startPrReview(
 
   const job = createJob(projectName, 'review', 0, '');
   job.provider = provider;
-  job.contextMeta = JSON.stringify({ sourceType: 'pr_review', prNumber, headRef, baseRef });
+  job.contextMeta = JSON.stringify({
+    sourceType: 'pr_review',
+    prNumber,
+    headRef,
+    baseRef,
+    ...(issueNumber ? { issueNumber } : {}),
+  });
   const logPath = join(logDir, `${job.id}.log`);
   job.logPath = logPath;
 

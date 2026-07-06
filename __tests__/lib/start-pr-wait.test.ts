@@ -70,7 +70,7 @@ vi.mock('@/lib/security/pr-branch-execution', () => ({
 }));
 
 // Import once at module scope; mocks above are hoisted before this resolves.
-import { launchPrWait, resumePrWait } from '@/lib/pipeline/start-pr-wait';
+import { launchPrWait, resumePrWait, resolvePrTarget } from '@/lib/pipeline/start-pr-wait';
 
 function resp(exitCode: number, stdout = '', stderr = '') {
   return Promise.resolve({ exitCode, stdout, stderr });
@@ -84,6 +84,55 @@ function defaultCreateJob(project: string, kind: string, pid: number, logPath: s
     cacheCreateTokens: null, sessionId: null, contextMeta: null, userPrompt: null,
   };
 }
+
+describe('resolvePrTarget', () => {
+  const { execMock } = mocks;
+
+  beforeEach(() => {
+    execMock.mockReset();
+  });
+
+  it('derives prRepo/prUrl from gh pr view JSON', async () => {
+    execMock.mockResolvedValue(resp(0, JSON.stringify({
+      url: 'https://github.com/owner/repo/pull/42',
+      headRepositoryOwner: { login: 'owner' },
+      headRepository: { name: 'repo' },
+    })));
+
+    const result = await resolvePrTarget('/repo/proj', 42);
+
+    expect(result).toEqual({ prRepo: 'owner/repo', prUrl: 'https://github.com/owner/repo/pull/42' });
+    expect(execMock).toHaveBeenCalledWith(
+      'gh',
+      ['pr', 'view', '42', '--json', 'url,headRepositoryOwner,headRepository'],
+      expect.objectContaining({ cwd: '/repo/proj' }),
+    );
+  });
+
+  it('returns an error when gh pr view exits non-zero', async () => {
+    execMock.mockResolvedValue(resp(4, '', 'gh: not authenticated'));
+
+    const result = await resolvePrTarget('/repo/proj', 42);
+
+    expect('error' in result).toBe(true);
+  });
+
+  it('returns an error when the JSON omits the head repo', async () => {
+    execMock.mockResolvedValue(resp(0, JSON.stringify({ url: 'https://x/pull/1' })));
+
+    const result = await resolvePrTarget('/repo/proj', 1);
+
+    expect(result).toEqual({ error: 'could not resolve prRepo/prUrl' });
+  });
+
+  it('returns an error when gh output is not valid JSON', async () => {
+    execMock.mockResolvedValue(resp(0, 'not json'));
+
+    const result = await resolvePrTarget('/repo/proj', 1);
+
+    expect('error' in result).toBe(true);
+  });
+});
 
 describe('launchPrWait', () => {
   const {
@@ -227,7 +276,7 @@ describe('launchPrWait', () => {
     }, { timeout: 3000, interval: 5 });
   });
 
-  it('marks job done with exit 1 when required checks fail', async () => {
+  it('marks job done with exit 1 AND stamps prWaitReason=ci_failed when required checks fail', async () => {
     execMock.mockResolvedValueOnce(resp(0, JSON.stringify({
       state: 'OPEN',
       mergeable: 'MERGEABLE',
@@ -241,6 +290,14 @@ describe('launchPrWait', () => {
     await vi.waitFor(() => {
       expect(markDoneMock).toHaveBeenCalledWith(expect.objectContaining({ kind: 'pr-wait' }), 1);
     }, { timeout: 3000, interval: 5 });
+
+    // inbox.ts reads contextMeta.prWaitReason to surface a CI-specific HITL
+    // instead of the generic manual-merge copy (and it must NOT self-heal here).
+    const stamped = updateJobMock.mock.calls.some((call: unknown[]) => {
+      const j = call[0] as { contextMeta?: unknown };
+      return typeof j?.contextMeta === 'string' && j.contextMeta.includes('"prWaitReason":"ci_failed"');
+    });
+    expect(stamped).toBe(true);
   });
 
   it('merges when all checks pass and marks job done 0', async () => {

@@ -41,6 +41,15 @@ function canonicalizeRenamePath(p: string): string {
   return p;
 }
 
+// Collapse a porcelain=v2 two-char XY status (X = index/staged vs HEAD, Y =
+// worktree vs index) into the single status letter `git diff HEAD --name-status`
+// would report: prefer the staged side, falling back to the worktree side.
+function xyStatus(xy: string): ChangeStatus {
+  const x = xy[0];
+  const y = xy[1];
+  return ((x && x !== '.' ? x : y) as ChangeStatus);
+}
+
 function parseNumstatLine(line: string): { additions: number; deletions: number; binary: boolean; filename: string } | null {
   const parts = line.split('\t');
   if (parts.length < 3) return null;
@@ -64,10 +73,8 @@ export async function GET(
   const projPath = resolveProjectPath(projectName);
   if (!projPath) return NextResponse.json({ detail: 'project not found' }, { status: 404 });
 
-  const [nameStatus, numstat, untracked, porcelain] = await Promise.all([
-    exec('git', ['-C', projPath, 'diff', 'HEAD', '--name-status'], { timeout: 10000 }),
+  const [numstat, porcelain] = await Promise.all([
     exec('git', ['-C', projPath, 'diff', 'HEAD', '--numstat'], { timeout: 10000 }),
-    exec('git', ['-C', projPath, 'ls-files', '--others', '--exclude-standard'], { timeout: 10000 }),
     exec('git', ['-C', projPath, 'status', '--porcelain=v2', '--branch'], { timeout: 5000 }),
   ]);
 
@@ -81,33 +88,51 @@ export async function GET(
     }
   }
 
+  // Derive the changed-file list + status, the untracked list, and branch/
+  // ahead-behind from the single `git status --porcelain=v2 --branch` rather than
+  // the former `diff --name-status` + `ls-files --others` pair. Fewer git
+  // processes contend on the object store, which is the dominant cost on repos
+  // with a large `.git` (each `git diff HEAD`/`status` is ~0.5s there, and
+  // running four in parallel thrashes the pack — 2–3s tab loads). Per-file line
+  // counts still come from `--numstat` (porcelain carries no add/delete totals);
+  // untracked files are still line-counted individually below.
   const files: ChangeFile[] = [];
   const seen = new Set<string>();
+  const rawUntracked: string[] = [];
+  let branchName: string | null = null;
+  let ahead = 0;
+  let behind = 0;
 
-  if (nameStatus.stdout.trim()) {
-    for (const line of nameStatus.stdout.trim().split('\n')) {
-      if (!line.trim()) continue;
-      const parts = line.split('\t');
-      if (parts.length < 2) continue;
-      const status = parts[0][0] as ChangeStatus;
-      const filename = parts[parts.length - 1];
-      const stats = statMap[filename] ?? { additions: 0, deletions: 0, binary: false };
-      files.push({
-        status,
-        filename,
-        additions: stats.additions,
-        deletions: stats.deletions,
-        binary: stats.binary,
-      });
-      seen.add(filename);
+  const pushTracked = (status: ChangeStatus, filename: string) => {
+    const stats = statMap[filename] ?? { additions: 0, deletions: 0, binary: false };
+    files.push({ status, filename, additions: stats.additions, deletions: stats.deletions, binary: stats.binary });
+    seen.add(filename);
+  };
+
+  for (const line of porcelain.stdout.split('\n')) {
+    if (line.startsWith('# branch.head ')) {
+      branchName = line.slice('# branch.head '.length).trim() || null;
+    } else if (line.startsWith('# branch.ab ')) {
+      const m = line.match(/\+(\d+)\s+-(\d+)/);
+      if (m) { ahead = parseInt(m[1], 10); behind = parseInt(m[2], 10); }
+    } else if (line.startsWith('1 ')) {
+      // Ordinary change: `1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>`.
+      const m = line.match(/^1 (..) \S+ \S+ \S+ \S+ \S+ \S+ (.+)$/);
+      if (m) pushTracked(xyStatus(m[1]), m[2]);
+    } else if (line.startsWith('2 ')) {
+      // Rename/copy: `2 <XY> ... <Xscore> <newPath>\t<origPath>` — keep the new path.
+      const m = line.match(/^2 (..) \S+ \S+ \S+ \S+ \S+ \S+ \S+ (.+)$/);
+      if (m) pushTracked(xyStatus(m[1]), m[2].split('\t')[0]);
+    } else if (line.startsWith('u ')) {
+      // Unmerged: `u <xy> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>`.
+      const m = line.match(/^u .. \S+ \S+ \S+ \S+ \S+ \S+ \S+ \S+ (.+)$/);
+      if (m) pushTracked('U', m[1]);
+    } else if (line.startsWith('? ')) {
+      rawUntracked.push(line.slice(2));
     }
   }
 
-  const untrackedNames = untracked.stdout
-    .trim()
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s && !seen.has(s));
+  const untrackedNames = rawUntracked.filter((s) => s && !seen.has(s));
 
   const untrackedFiles = await Promise.all(
     untrackedNames.map(async (name): Promise<ChangeFile> => {
@@ -141,17 +166,6 @@ export async function GET(
 
   const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0);
   const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0);
-
-  // Parse branch name and ahead/behind from porcelain v2 (no network)
-  const porcelainLines = porcelain.stdout.split('\n');
-  const branchName = porcelainLines.find((l) => l.startsWith('# branch.head '))?.slice('# branch.head '.length).trim() || null;
-  let behind = 0;
-  let ahead = 0;
-  const abLine = porcelainLines.find((l) => l.startsWith('# branch.ab '));
-  if (abLine) {
-    const m = abLine.match(/\+(\d+)\s+-(\d+)/);
-    if (m) { ahead = parseInt(m[1], 10); behind = parseInt(m[2], 10); }
-  }
 
   // Detect default branch via origin/HEAD, falling back to main/master.
   // Inlined to keep this route DB-free so its unit tests can mock fs narrowly.

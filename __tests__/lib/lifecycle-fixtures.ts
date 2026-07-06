@@ -197,6 +197,8 @@ const mocks = vi.hoisted(() => ({
   startMarkDod: vi.fn(),
   // pipeline/start-pr-wait
   launchPrWait: vi.fn(),
+  // pipeline/pr-review-merge
+  maybeAutoMergeAfterPrReview: vi.fn(),
   // jobs/verdict-retry
   retryVerdictWithClaude: vi.fn(),
   // agents/agent-run-report
@@ -277,6 +279,9 @@ vi.mock('@/lib/pipeline/start-mark-dod', () => ({
 }));
 vi.mock('@/lib/pipeline/start-pr-wait', () => ({
   launchPrWait: mocks.launchPrWait,
+}));
+vi.mock('@/lib/pipeline/pr-review-merge', () => ({
+  maybeAutoMergeAfterPrReview: mocks.maybeAutoMergeAfterPrReview,
 }));
 vi.mock('@/lib/jobs/verdict-retry', () => ({
   retryVerdictWithClaude: mocks.retryVerdictWithClaude,
@@ -364,6 +369,7 @@ function applyDefaultMocks(): void {
   mocks.isReviewRetestJob.mockReturnValue(false);
   mocks.startMarkDod.mockResolvedValue({ ok: true, verified: 1, total: 1, changed: false });
   mocks.launchPrWait.mockReturnValue({ jobId: 'pr-wait-job' });
+  mocks.maybeAutoMergeAfterPrReview.mockResolvedValue({ launched: false, reason: 'auto-merge-disabled' });
   mocks.retryVerdictWithClaude.mockResolvedValue(null);
   mocks.finalizeAgentRunReport.mockResolvedValue(undefined);
   mocks.drainNextAgentRun.mockResolvedValue(undefined);

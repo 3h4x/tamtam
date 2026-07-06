@@ -391,7 +391,7 @@ export function PRRow({
               className="rounded-md text-[10px]"
               onClick={doReview}
               disabled={reviewing || jobsPaused}
-              title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a PR review.' : 'AI code review of this PR\'s diff'}
+              title={jobsPaused ? 'Jobs are paused globally. Resume jobs to start a PR review.' : 'AI review of this PR (diff + the linked issue\'s acceptance criteria). If it passes and this project has auto-merge on, the PR merges once CI is green; a red PR raises a HITL instead.'}
             >
               {reviewing && <Spinner size="sm" shrink />}
               Review

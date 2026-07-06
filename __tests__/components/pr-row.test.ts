@@ -247,7 +247,7 @@ describe('PRRow', () => {
     await vi.waitFor(() => {
       const enabledReviewButton = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.trim() === 'Review') as HTMLButtonElement | undefined
       expect(enabledReviewButton?.disabled).toBe(false)
-      expect(enabledReviewButton?.getAttribute('title')).toBe('AI code review of this PR\'s diff')
+      expect(enabledReviewButton?.getAttribute('title')).toContain('AI review of this PR')
     })
 
     unmount()

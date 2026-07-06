@@ -58,10 +58,8 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
 
   it('returns files with additions and deletions from numstat', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'M\tsrc/a.ts\nA\tsrc/b.ts\n' })) // name-status
       .mockResolvedValueOnce(makeExecResult({ stdout: '10\t2\tsrc/a.ts\n5\t0\tsrc/b.ts\n' })) // numstat
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n' })); // porcelain
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head master\n# branch.ab +0 -0\n1 M. N... 100644 100644 100644 aaa bbb src/a.ts\n1 A. N... 000000 100644 100644 000 ccc src/b.ts\n' })); // porcelain (--branch + entries)
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -76,10 +74,8 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
 
   it('marks files as binary when numstat reports -/-', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'M\timage.png\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: '-\t-\timage.png\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '-\t-\timage.png\n' })) // numstat (binary)
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n1 M. N... 100644 100644 100644 aaa bbb image.png\n' })); // porcelain
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -89,10 +85,8 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
 
   it('includes untracked files as A with addition count from diff --no-index', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // name-status empty
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // numstat empty
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'new.ts\n' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' })) // porcelain
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n? new.ts\n' })) // porcelain (untracked entry)
       .mockResolvedValueOnce(makeExecResult({ exitCode: 1, stdout: '7\t0\t/dev/null\n' })); // diff --no-index
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
@@ -103,27 +97,25 @@ describe('GET /api/projects/by-project/[projectName]/changes', () => {
     expect(data.totalAdditions).toBe(7);
   });
 
-  it('does not duplicate untracked files already in name-status', async () => {
+  it('does not double-count a path listed as both tracked and untracked', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'A\tnew.ts\n' })) // name-status (already staged? unlikely but guard)
-      .mockResolvedValueOnce(makeExecResult({ stdout: '3\t0\tnew.ts\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'new.ts\n' })) // untracked (duplicate)
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '3\t0\tnew.ts\n' })) // numstat
+      // Defensive: the same path appears as a tracked add AND (which real git
+      // never emits) an untracked `?` entry. The `seen` guard must drop the dup.
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n1 A. N... 000000 100644 100644 000 ccc new.ts\n? new.ts\n' })); // porcelain
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data.files).toHaveLength(1);
-    expect(data.files[0].filename).toBe('new.ts');
+    expect(data.files[0]).toMatchObject({ status: 'A', filename: 'new.ts', additions: 3 });
   });
 
   it('marks untracked files >2MB as binary without reading diff', async () => {
     statSyncMock.mockReturnValue({ size: 3 * 1024 * 1024 });
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'big.bin\n' }))
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' }));
+      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // numstat
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n? big.bin\n' })); // porcelain (untracked)
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -154,10 +146,8 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
 
   function setupEmptyConcurrentCalls(porcelain: string) {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // name-status
       .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // numstat
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: porcelain })); // porcelain
+      .mockResolvedValueOnce(makeExecResult({ stdout: porcelain })); // porcelain (--branch + entries)
   }
 
   it('detects defaultBranch from symbolic-ref when it resolves', async () => {
@@ -234,10 +224,8 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
 
   it('handles rename paths with brace syntax in numstat', async () => {
     execMock
-      .mockResolvedValueOnce(makeExecResult({ stdout: 'R100\tsrc/old.ts\tsrc/new.ts\n' })) // name-status
       .mockResolvedValueOnce(makeExecResult({ stdout: '8\t3\tsrc/{old.ts => new.ts}\n' })) // numstat with brace rename
-      .mockResolvedValueOnce(makeExecResult({ stdout: '' })) // untracked
-      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n' })); // porcelain
+      .mockResolvedValueOnce(makeExecResult({ stdout: '# branch.head main\n# branch.ab +0 -0\n2 R. N... 100644 100644 100644 aaa bbb R100 src/new.ts\tsrc/old.ts\n' })); // porcelain (rename entry)
 
     const req = new NextRequest('http://localhost/api/projects/by-project/myproj/changes');
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
@@ -325,9 +313,9 @@ describe('GET /api/projects/by-project/[projectName]/changes — defaultBranch a
     const res = await GET(req, { params: Promise.resolve({ projectName: 'myproj' }) });
     const data = await res.json();
     expect(data.openPrUrl).toBeNull();
-    // gh pr list should never have been called — only symbolic-ref after the 4 setup calls
-    // execMock call count: 4 (setup) + 1 (symbolic-ref) = 5
-    expect(execMock).toHaveBeenCalledTimes(5);
+    // gh pr list should never have been called — only symbolic-ref after the two
+    // parallel setup calls (numstat + porcelain). Call count: 2 + 1 = 3.
+    expect(execMock).toHaveBeenCalledTimes(3);
   });
 });
 

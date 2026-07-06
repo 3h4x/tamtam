@@ -216,6 +216,40 @@ export interface PrWaitContextMeta {
   prUrl: string;
 }
 
+/**
+ * Resolve the `{ prRepo, prUrl }` a pr-wait needs from just a PR number, via
+ * `gh pr view`. Shared by the manual `/pr-wait` route and the PR-review
+ * auto-merge handoff so both derive the head repo/URL the same way.
+ */
+export async function resolvePrTarget(
+  projPath: string,
+  prNumber: number,
+): Promise<{ prRepo: string; prUrl: string } | { error: string }> {
+  const ghOut = await exec(
+    'gh',
+    ['pr', 'view', String(prNumber), '--json', 'url,headRepositoryOwner,headRepository'],
+    { cwd: projPath, timeout: 15000 },
+  );
+  if (ghOut.exitCode !== 0) {
+    return { error: `gh pr view failed: ${ghOut.stderr || ghOut.stdout}` };
+  }
+  try {
+    const parsed = JSON.parse(ghOut.stdout) as {
+      url?: string;
+      headRepositoryOwner?: { login?: string };
+      headRepository?: { name?: string };
+    };
+    const prUrl = parsed.url;
+    const prRepo = parsed.headRepositoryOwner?.login && parsed.headRepository?.name
+      ? `${parsed.headRepositoryOwner.login}/${parsed.headRepository.name}`
+      : undefined;
+    if (!prRepo || !prUrl) return { error: 'could not resolve prRepo/prUrl' };
+    return { prRepo, prUrl };
+  } catch (err) {
+    return { error: `gh pr view parse: ${(err as Error).message}` };
+  }
+}
+
 function canonicalizeInlinePrWaitJob(job: JobData): void {
   // Resumed pr-wait jobs must use the inline sentinel pid=0 so
   // probeJobStatus keeps treating them as self-finalizing in-process work.
@@ -272,7 +306,13 @@ function runPrWaitLoop(
             .map(c => `  ${c.name ?? c.context ?? '?'}: ${(c.conclusion ?? c.state ?? 'unknown').toLowerCase()}`)
             .join('\n');
           log(`\n# checks failed:\n${failedChecks}\n`);
-          await markDone(job, 1);
+          // Stamp a distinct terminal reason so the inbox surfaces a CI-specific
+          // HITL ("CI failing — fix first") instead of the generic manual-merge
+          // copy. This inline loop does NOT self-heal via fix-ci (that is the
+          // release-linked workflow path's job), so a red PR here is a real
+          // human decision — it must surface, not silently stop. 'ci_failed' is
+          // deliberately NOT in inbox's NO_HITL_REASONS.
+          await finalizeInlinePrWait(job, 'ci_failed');
           return;
         }
 

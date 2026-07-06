@@ -190,6 +190,22 @@ describe('deriveInboxSignals', () => {
     expect(signals.find((x) => x.type === 'pr_needs_manual_merge')).toBeUndefined();
   });
 
+  it('surfaces a red-CI pr-wait (ci_failed) as a HITL with a CI-specific message', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'pr-wait', exitCode: 1, prWaitReason: 'ci_failed', prNumber: 78 })],
+        openPrNumbersByProject: { alpha: [78] },
+      }),
+    );
+    const s = signals.find((x) => x.type === 'pr_needs_manual_merge');
+    expect(s).toBeDefined();
+    // Message must name CI as the blocker so the operator knows to fix the
+    // failing check before merging — not the generic "needs a merge decision".
+    expect(s?.detail).toMatch(/\bCI\b/);
+    expect(s?.detail).toMatch(/fix/i);
+  });
+
   it('flags a pr-wait that stopped on a merge conflict as needing manual merge (no silent stop)', () => {
     const signals = deriveInboxSignals(
       baseInput({

@@ -144,6 +144,7 @@ const NO_HITL_REASONS = new Set(['merged', 'pr_closed', 'checks_failed']);
 const MERGE_REASON_DETAIL: Record<string, string> = {
   risky_diff: 'Auto-merge deferred — PR diff touches high-risk execution files. Needs a human merge decision.',
   merge_permanent: 'Auto-merge blocked — manual merge required.',
+  ci_failed: 'Auto-merge blocked — the PR’s CI checks are failing. Fix the failing check(s), then run Review again to merge.',
   conflict: 'Auto-merge blocked — the PR has merge conflicts with the base branch. Needs a manual rebase/resolve or merge.',
   switch_failed: 'Auto-merge could not complete — the pipeline failed to switch branches. Needs a human check.',
   timeout: 'Auto-merge timed out waiting for the PR to become mergeable. Needs a human check.',
