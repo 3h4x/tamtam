@@ -317,3 +317,30 @@ export async function resolveRecommendationIfOpen(
   const id = recommendationId(project, type, agent.agentId || agent.agentName || 'project');
   return updateRecommendationStatusIfCurrent(project, id, 'open', 'resolved');
 }
+
+/**
+ * Bulk-retire OPEN recommendations of `type` for a set of agents in one
+ * statement — flips `open → resolved`, skipping any row an operator already
+ * `dismissed`/`applied` and any row of another type. Used by the unfruitful
+ * sweep to reconcile `agent_unfruitful` rows for agents that are now disabled:
+ * those rows can never self-resolve (the recovery path only fires from a
+ * scheduled run, and a disabled agent's cron is uninstalled), so without this
+ * they linger in the decision feed forever — including rows created before
+ * auto-disable recs were emitted `resolved`. Returns how many rows were retired.
+ */
+export async function resolveOpenRecommendationsForAgents(type: string, agentIds: string[]): Promise<number> {
+  if (agentIds.length === 0) return 0;
+  const now = Date.now() / 1000;
+  const updated = await db
+    .update(schema.recommendations)
+    .set({ status: 'resolved', updatedAt: now })
+    .where(
+      and(
+        eq(schema.recommendations.type, type),
+        eq(schema.recommendations.status, 'open'),
+        inArray(schema.recommendations.agentId, agentIds),
+      ),
+    )
+    .returning({ id: schema.recommendations.id });
+  return updated.length;
+}

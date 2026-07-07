@@ -344,7 +344,7 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulAgentDisableR
     { listJobs },
     { isAgentJobKind },
     { listEnabledProjects },
-    { upsertRecommendation },
+    { upsertRecommendation, resolveOpenRecommendationsForAgents },
     { getAllAgentsCachedAsync, clearAgentsCache },
     { parseAgentRole },
     { db, schema },
@@ -370,7 +370,7 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulAgentDisableR
   );
   const agents = await getAllAgentsCachedAsync();
 
-  return autoDisableUnfruitfulAgents({
+  const result = await autoDisableUnfruitfulAgents({
     enabled: s.auto_pause_unfruitful_enabled,
     threshold: s.auto_pause_unfruitful_runs,
     rateThreshold: s.auto_pause_unfruitful_rate,
@@ -414,4 +414,23 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulAgentDisableR
       }),
     log: (m) => console.log(m),
   });
+
+  // Self-heal: retire any stale OPEN `agent_unfruitful` recommendation whose
+  // agent is already disabled. Those rows can never resolve on their own — the
+  // recovery path only fires from a scheduled run, and a disabled agent's cron
+  // is uninstalled — so without this they linger in the decision feed forever.
+  // This reconciles rows created before auto-disable recs were emitted
+  // `resolved`, plus any agent an operator disabled by hand. `agents` is the
+  // pre-sweep snapshot, so this cycle's fresh disables (already emitted
+  // `resolved`) are not double-handled. Idempotent: the bulk resolver skips
+  // rows an operator dismissed/applied and rows that are already resolved.
+  try {
+    const disabledAgentIds = agents.filter((a) => !a.enabled).map((a) => a.id);
+    const reconciled = await resolveOpenRecommendationsForAgents('agent_unfruitful', disabledAgentIds);
+    if (reconciled > 0) console.log(`[unfruitful-pause] reconciled ${reconciled} stale open agent_unfruitful rec(s) for disabled agents`);
+  } catch (e) {
+    console.error('[unfruitful-pause] stale-rec reconcile failed:', e instanceof Error ? e.message : String(e));
+  }
+
+  return result;
 }

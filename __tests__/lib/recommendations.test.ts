@@ -33,6 +33,7 @@ describe('recommendations storage', () => {
   let listRecommendations: typeof import('@/lib/recommendations/recommendations').listRecommendations;
   let updateRecommendationStatus: typeof import('@/lib/recommendations/recommendations').updateRecommendationStatus;
   let resolveRecommendationIfOpen: typeof import('@/lib/recommendations/recommendations').resolveRecommendationIfOpen;
+  let resolveOpenRecommendationsForAgents: typeof import('@/lib/recommendations/recommendations').resolveOpenRecommendationsForAgents;
   let recommendationId: typeof import('@/lib/recommendations/recommendations').recommendationId;
   let listAllOpenRecommendations: typeof import('@/lib/recommendations/recommendations').listAllOpenRecommendations;
   let listAllResolvedRecommendations: typeof import('@/lib/recommendations/recommendations').listAllResolvedRecommendations;
@@ -55,7 +56,7 @@ describe('recommendations storage', () => {
     vi.resetModules();
     await sharedHandle.db.execute(sql.raw('TRUNCATE recommendations'));
     vi.doMock('@/lib/db', () => ({ db: sharedHandle.db, schema }));
-    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus, resolveRecommendationIfOpen, recommendationId, listAllOpenRecommendations, listAllResolvedRecommendations } = await import('@/lib/recommendations/recommendations'));
+    ({ upsertRecommendation, listRecommendations, updateRecommendationStatus, resolveRecommendationIfOpen, resolveOpenRecommendationsForAgents, recommendationId, listAllOpenRecommendations, listAllResolvedRecommendations } = await import('@/lib/recommendations/recommendations'));
   });
 
   afterEach(async () => {
@@ -256,5 +257,30 @@ describe('recommendations storage', () => {
     expect(await resolveRecommendationIfOpen('portal', 'agent_unfruitful', { agentId: 'agent-9' })).toBeNull();
     const rows = await listRecommendations('portal');
     expect(rows.find((r) => r.id === created!.id)?.status).toBe('dismissed');
+  });
+
+  it('bulk-resolves open recs of a type for a set of agents, leaving other agents, types, and operator decisions untouched', async () => {
+    const mk = (agentId: string, type: string, status?: 'open' | 'dismissed') =>
+      upsertRecommendation({
+        project: 'p', sourceKind: 'orchestrator', agentId, agentName: agentId,
+        type, title: 't', detail: 'd', ...(status ? { status } : {}),
+      });
+    await mk('a1', 'agent_unfruitful');
+    await mk('a2', 'agent_unfruitful');
+    await mk('a3', 'agent_unfruitful'); // disabled agent NOT in the reconcile set
+    await mk('a4', 'agent_unfruitful', 'dismissed'); // operator decision — must survive
+    await mk('a1', 'agent_schedule_backoff'); // different type — must survive
+
+    const n = await resolveOpenRecommendationsForAgents('agent_unfruitful', ['a1', 'a2', 'a4']);
+    expect(n).toBe(2); // a1 + a2 flipped; a4 was dismissed (skipped)
+
+    const open = (await listAllOpenRecommendations()).map((r) => r.id);
+    expect(open).not.toContain(recommendationId('p', 'agent_unfruitful', 'a1'));
+    expect(open).not.toContain(recommendationId('p', 'agent_unfruitful', 'a2'));
+    expect(open).toContain(recommendationId('p', 'agent_unfruitful', 'a3'));
+    expect(open).toContain(recommendationId('p', 'agent_schedule_backoff', 'a1'));
+
+    // Empty set is a no-op.
+    expect(await resolveOpenRecommendationsForAgents('agent_unfruitful', [])).toBe(0);
   });
 });
