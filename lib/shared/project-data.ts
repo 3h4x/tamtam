@@ -13,8 +13,20 @@ import { ghStatusLookup, type GhStatusEntry } from './gh-status';
 import { listJobs } from '@/lib/jobs/storage';
 import { gitChanges, isReviewed } from '@/lib/git/git-utils';
 import { exec } from '@/lib/shared/shell';
+import { mapWithConcurrency } from '@/lib/shared/concurrency';
 import { formatTimeAgo } from '@/lib/shared/format';
+import { cpus } from 'node:os';
 import type { Task } from '@/lib/shared/types';
+
+// Bound the per-project git fan-out. Each project's assembly runs several `git`
+// shell-outs (status, rev-list, rev-parse, symbolic-ref, remote get-url), so an
+// unbounded `Promise.all` over every project spawns 50-120 near-simultaneous
+// subprocesses — a storm that saturates CPU / the event loop and stalls
+// concurrent requests whose awaits land during the sweep (measured: an inbox
+// poll spiking to ~2s while the sweep ran). Cap the number of projects assembled
+// at once so peak subprocess pressure stays bounded regardless of fleet size;
+// I/O still overlaps `SWEEP_CONCURRENCY`-ways so total wall-clock stays low.
+const SWEEP_CONCURRENCY = Math.max(2, Math.min(8, (cpus()?.length ?? 4) - 2));
 
 // "Most-recent run" projection used by the projects-list UI to render
 // "last run X minutes ago — exit N" columns.
@@ -277,14 +289,14 @@ async function _computeProjectData(): Promise<ProjectData> {
   const schedIds = Object.keys(projects);
 
   // Parallel fetch: changes + gh status. Paused state is read from the
-  // enabled-projects cache and joined locally (no extra DB round-trip).
+  // enabled-projects cache and joined locally (no extra DB round-trip). The
+  // per-project `git status` calls are bounded so they don't add to the
+  // subprocess storm alongside the assembly phase below.
   const [changesResults, ghStatus] = await Promise.all([
-    Promise.all(
-      schedIds.map(async (sid) => {
-        const c = await gitChanges(projects[sid].path);
-        return [sid, c ?? 0] as const;
-      })
-    ),
+    mapWithConcurrency(schedIds, SWEEP_CONCURRENCY, async (sid) => {
+      const c = await gitChanges(projects[sid].path);
+      return [sid, c ?? 0] as const;
+    }),
     ghStatusLookup(projects).catch(() => ({} as Record<string, GhStatusEntry>)),
   ]);
 
@@ -293,18 +305,21 @@ async function _computeProjectData(): Promise<ProjectData> {
   for (const p of listEnabledProjects()) pausedMap[p.name] = !!p.paused;
 
   // Each `assembleProject` runs 4-6 `git` shell-outs (rev-list, rev-parse,
-  // symbolic-ref, remote get-url). With 25 projects, doing this serially is
-  // the dominant cost of a cold `/api/projects` (~500 ms total). Running
-  // them concurrently brings it under 100 ms and lets the cache amortize.
+  // symbolic-ref, remote get-url). Running them fully concurrently across every
+  // project is what produced the subprocess storm; `mapWithConcurrency` caps the
+  // fan-out to `SWEEP_CONCURRENCY` projects at a time so I/O still overlaps but
+  // peak subprocess pressure stays bounded and doesn't stall concurrent requests.
   const projectTasks: Record<string, Task[]> = {};
-  const assembled = await Promise.all(
-    Object.entries(projects).map(async ([sid, cfg]) => {
+  const assembled = await mapWithConcurrency(
+    Object.entries(projects),
+    SWEEP_CONCURRENCY,
+    async ([sid, cfg]) => {
       const task = await assembleProject(
         sid, cfg, tierIdxMap[sid], baseFreqMin, multipliers,
         lastRuns, ghStatus, changesMap, pausedMap,
       );
       return { projName: cfg.project, task };
-    }),
+    },
   );
   for (const { projName, task } of assembled) {
     if (!projectTasks[projName]) projectTasks[projName] = [];

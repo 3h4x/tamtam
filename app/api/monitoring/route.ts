@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { db, schema } from '@/lib/db'
 import { getSettings } from '@/lib/shared/config'
+import { swrGet, type SwrStore } from '@/lib/shared/swr-cache'
 import {
   getLatestNightlyRetentionSummary,
   getLatestProjectLogRetentionSummary,
@@ -53,15 +54,7 @@ async function queryLoki(query: string, startNs: string, limit = 30): Promise<Lo
   return lines.sort((a, b) => b.ts.localeCompare(a.ts))
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const windowMs = (() => {
-    switch (searchParams.get('window')) {
-      case '5m': return 5 * 60 * 1000
-      case '1h': return 60 * 60 * 1000
-      default: return 15 * 60 * 1000
-    }
-  })()
+async function computeMonitoringSnapshot(windowMs: number) {
   const now = Date.now()
   const start15mNs = String((now - windowMs) * 1_000_000)
 
@@ -154,5 +147,38 @@ export async function GET(request: Request) {
     (loki.status === 'ok' && loki.errors.length > 0) ||
     !!retentionHasIssues
 
-  return NextResponse.json({ prometheus, loki, notificationThrottle, retention, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } })
+  return { prometheus, loki, notificationThrottle, retention, hasIssues, fetchedAt: now, windowMs, config: { prometheusUrl: PROMETHEUS_URL, lokiUrl: LOKI_URL } }
+}
+
+// SWR cache for the monitoring snapshot. Every /api/monitoring call fans out 2
+// Prometheus + 2 Loki queries over the goro autossh tunnel — ~300 ms of network
+// round-trips on EVERY call regardless of host load (the route is already fully
+// parallel, so caching is the only remaining lever). The /monitoring page polls
+// this every 30 s and is labelled "auto-refresh 30 s", so a few seconds of extra
+// staleness is invisible there, and real alerting is push-based (outbound
+// webhooks) not this dashboard — serving the snapshot stale-while-revalidate is
+// safe and collapses repeated polls / multiple tabs to one background refresh.
+// Keyed by window so 5m/15m/1h don't clobber each other. Pinned to globalThis
+// because Next.js duplicates route modules across bundle realms.
+type MonitoringSnapshot = Awaited<ReturnType<typeof computeMonitoringSnapshot>>
+declare global {
+  var __tamtamMonitoringCache: Map<string, { value: MonitoringSnapshot; time: number }> | undefined
+  var __tamtamMonitoringInflight: Map<string, Promise<MonitoringSnapshot>> | undefined
+}
+const MONITORING_TTL_MS = 15_000
+
+export async function GET(request: Request) {
+  const windowMs = (() => {
+    switch (new URL(request.url).searchParams.get('window')) {
+      case '5m': return 5 * 60 * 1000
+      case '1h': return 60 * 60 * 1000
+      default: return 15 * 60 * 1000
+    }
+  })()
+  const store: SwrStore<MonitoringSnapshot> = {
+    cache: (globalThis.__tamtamMonitoringCache ??= new Map()),
+    inflight: (globalThis.__tamtamMonitoringInflight ??= new Map()),
+  }
+  const snapshot = await swrGet(store, String(windowMs), MONITORING_TTL_MS, () => computeMonitoringSnapshot(windowMs))
+  return NextResponse.json(snapshot)
 }

@@ -6,6 +6,7 @@ import { listAutomationQueue, type AutomationQueueItem } from '@/lib/workflows/a
 import { db, schema } from '@/lib/db';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
+import { swrGet, type SwrStore } from '@/lib/shared/swr-cache';
 import type { Task } from '@/lib/shared/types';
 
 // The inbox is a cross-project triage feed: one prioritized row per actionable
@@ -732,11 +733,39 @@ async function loadOpenPrs(
   return { byProject, numbersByProject };
 }
 
+type InboxSignalsResult = { signals: InboxSignal[]; counts: InboxCounts };
+
+// SWR cache for the full cross-project inbox derivation. Both `/api/inbox` (the
+// nav-badge count that fires on EVERY page) and `/api/attention` (the project
+// pages) call this, and on top of the project-data sweep it does its own
+// uncached DB work every call — the open-PR cache scan (`loadOpenPrs`), pause
+// reasons, and the automation queue — ~80-100 ms per request. The feed is triage
+// state, not real-time, so serving it stale-while-revalidate for a few seconds
+// is fine: repeated per-page polls collapse to one background compute, and
+// concurrent misses (nav badge + a project page mounting together) single-flight
+// to one run instead of each recomputing. Pinned to globalThis because Next.js
+// duplicates route modules across bundle realms.
+declare global {
+  var __tamtamInboxSignalsCache: Map<string, { value: InboxSignalsResult; time: number }> | undefined;
+  var __tamtamInboxSignalsInflight: Map<string, Promise<InboxSignalsResult>> | undefined;
+}
+const INBOX_SIGNALS_TTL_MS = 8_000;
+
 /**
  * Gather the current cross-project state and derive the inbox feed. This is the
- * single entry point the `/api/inbox` route calls.
+ * single entry point the `/api/inbox` and `/api/attention` routes call. The
+ * result is the full cross-project set; each route filters it by `?project`
+ * itself, so a single cache key ('all') serves both. SWR-cached (see above).
  */
-export async function listInboxSignals(): Promise<{ signals: InboxSignal[]; counts: InboxCounts }> {
+export async function listInboxSignals(): Promise<InboxSignalsResult> {
+  const store: SwrStore<InboxSignalsResult> = {
+    cache: (globalThis.__tamtamInboxSignalsCache ??= new Map()),
+    inflight: (globalThis.__tamtamInboxSignalsInflight ??= new Map()),
+  };
+  return swrGet(store, 'all', INBOX_SIGNALS_TTL_MS, computeInboxSignals);
+}
+
+async function computeInboxSignals(): Promise<InboxSignalsResult> {
   const [{ projects }, automationQueue] = await Promise.all([
     fetchProjectData(),
     listAutomationQueue().catch(() => [] as AutomationQueueItem[]),

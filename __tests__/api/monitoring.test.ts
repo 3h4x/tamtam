@@ -62,6 +62,11 @@ describe('GET /api/monitoring', () => {
 
   beforeEach(async () => {
     vi.resetModules();
+    // The route SWR-caches its snapshot on globalThis (survives resetModules), so
+    // reset it between cases — each test asserts a fresh compute against its own
+    // fetch-mock sequence and must start from a cold cache.
+    (globalThis as Record<string, unknown>).__tamtamMonitoringCache = undefined;
+    (globalThis as Record<string, unknown>).__tamtamMonitoringInflight = undefined;
     await sharedHandle.db.execute(sql.raw('TRUNCATE notification_throttle, maintenance_status'));
     vi.doMock('@/lib/db', () => ({
       db: sharedHandle.db,

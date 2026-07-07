@@ -263,7 +263,14 @@ describe('autoDisableUnfruitfulAgents', () => {
       expect.objectContaining({ id: 'a-refactor', name: 'refactor-split', project: 'proj' }),
     );
     expect(deps.recommend).toHaveBeenCalledTimes(1);
-    expect(deps.recommend.mock.calls[0][0].agentName).toBe('refactor-split');
+    const call = deps.recommend.mock.calls[0][0];
+    expect(call.agentName).toBe('refactor-split');
+    // The disable already happened: the recommendation is a completed-action
+    // record, so it is created `resolved` (archives to History, out of the
+    // decision queue) and carries `enabled:false` so the Fix menu never offers
+    // Run/Disable on an already-disabled agent.
+    expect(call.status).toBe('resolved');
+    expect(call.payload).toEqual({ enabled: false });
   });
 
   it('disables a persistently-unfruitful producer with a rate-reason recommendation', async () => {
@@ -274,7 +281,10 @@ describe('autoDisableUnfruitfulAgents', () => {
     const deps = baseDeps({ listJobs: () => jobs, recommend });
     const res = await autoDisableUnfruitfulAgents(deps as never);
     expect(res.disabled).toEqual(['refactor-split']);
-    expect(recommend.mock.calls[0][0].title).toMatch(/persistently unfruitful/i);
+    const call = recommend.mock.calls[0][0];
+    expect(call.title).toMatch(/persistently unfruitful/i);
+    expect(call.status).toBe('resolved');
+    expect(call.payload).toEqual({ enabled: false });
   });
 
   it('never disables a non-producer agent (idle is by-design for publisher/monitor/reviewer/planner)', async () => {

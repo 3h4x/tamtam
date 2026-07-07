@@ -52,37 +52,69 @@ export function ProjectSignals({ projectName }: { projectName: string }) {
   // appears when there is something to act on.
   if (!loaded || items.length === 0) return null
 
-  // Items arrive pre-sorted red → yellow → green, so items[0] is the most
-  // severe; use it to colour the banner frame.
-  const topSeverity = items[0].severity
-  const counts: Record<AttentionSeverity, number> = { red: 0, yellow: 0, green: 0 }
-  for (const i of items) counts[i.severity] += 1
+  // Split the merged feed into genuine shippability DECISIONS (inbox signals)
+  // and non-blocking agent-quality ADVISORIES (recommendations). Only the
+  // former belong under "Needs your decision"; advisories move to a muted
+  // "Agent health" subsection so agent nudges stop reading as blockers.
+  const signals = items.filter((i) => i.source === 'signal')
+  const advisories = items.filter((i) => i.source === 'recommendation')
+  const countBy = (list: AttentionItem[]): Record<AttentionSeverity, number> => {
+    const c: Record<AttentionSeverity, number> = { red: 0, yellow: 0, green: 0 }
+    for (const i of list) c[i.severity] += 1
+    return c
+  }
+  const signalCounts = countBy(signals)
+
+  // The banner frame adopts the most-severe SIGNAL colour (real decisions drive
+  // the alarm); items are pre-sorted red → yellow → green, so signals[0] is the
+  // most severe. An advisory-only banner stays neutral — no alarm frame.
+  const frame = signals.length > 0 ? SEVERITY_FRAME[signals[0].severity] : 'border-border'
 
   return (
     <section
       aria-label="Decisions needed for this project"
-      className={`mb-3 rounded-lg border p-3 ${SEVERITY_FRAME[topSeverity]}`}
+      className={`mb-3 rounded-lg border p-3 ${frame}`}
     >
-      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-sm font-semibold text-text-primary">Needs your decision</span>
-        <span className="text-xs text-text-secondary">
-          {items.length} action{items.length === 1 ? '' : 's'} waiting on you
-        </span>
-        <span className="ml-auto flex flex-wrap items-center gap-1.5">
-          {(['red', 'yellow', 'green'] as AttentionSeverity[]).map((sev) =>
-            counts[sev] > 0 ? (
-              <Pill key={sev} tone={SEVERITY_TONE[sev]} size="xs">
-                {counts[sev]} {SEVERITY_LABEL[sev]}
-              </Pill>
-            ) : null,
-          )}
-        </span>
-      </div>
-      <div className="space-y-2">
-        {items.map((item) => (
-          <AttentionRow key={item.id} item={item} onRun={dispatchAttentionAction} onResolved={load} defaultExpanded />
-        ))}
-      </div>
+      {signals.length > 0 && (
+        <>
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-sm font-semibold text-text-primary">Needs your decision</span>
+            <span className="text-xs text-text-secondary">
+              {signals.length} action{signals.length === 1 ? '' : 's'} waiting on you
+            </span>
+            <span className="ml-auto flex flex-wrap items-center gap-1.5">
+              {(['red', 'yellow', 'green'] as AttentionSeverity[]).map((sev) =>
+                signalCounts[sev] > 0 ? (
+                  <Pill key={sev} tone={SEVERITY_TONE[sev]} size="xs">
+                    {signalCounts[sev]} {SEVERITY_LABEL[sev]}
+                  </Pill>
+                ) : null,
+              )}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {signals.map((item) => (
+              <AttentionRow key={item.id} item={item} onRun={dispatchAttentionAction} onResolved={load} defaultExpanded />
+            ))}
+          </div>
+        </>
+      )}
+
+      {advisories.length > 0 && (
+        <div className={signals.length > 0 ? 'mt-3 border-t border-border/60 pt-3' : ''}>
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-text-tertiary">Agent health</span>
+            <span className="text-xs text-text-tertiary">
+              {advisories.length} advisor{advisories.length === 1 ? 'y' : 'ies'} · not blocking
+            </span>
+          </div>
+          <div className="space-y-2">
+            {advisories.map((item) => (
+              <AttentionRow key={item.id} item={item} onRun={dispatchAttentionAction} onResolved={load} defaultExpanded={false} />
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   )
 }

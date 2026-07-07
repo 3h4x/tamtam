@@ -2,11 +2,22 @@ import { eq } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
 import { exec } from '@/lib/shared/shell';
 import { getSettings } from '@/lib/shared/config';
-import { homedir } from 'os';
+import { mapWithConcurrency } from '@/lib/shared/concurrency';
+import { homedir, cpus } from 'os';
 
 const GH_CACHE_TTL = 3600;
 const GH_CACHE_TTL_FAILURE = 300;
 const GH_CACHE_TTL_PENDING = 30;
+
+// Bound the per-project fan-out. ghStatusLookup runs inside the fetchProjectData
+// hot path alongside the (already-bounded) git-changes sweep, and for every
+// project it shells out to git (remote get-url, rev-parse) and — for stale
+// entries — several NETWORK-bound gh / git-ls-remote calls (10s timeouts each).
+// Left unbounded (Promise.all over every project) that is a second subprocess
+// storm that co-saturates CPU / the event loop with the git sweep. Cap it with
+// the same shared limiter so peak spawn pressure stays bounded regardless of
+// fleet size; I/O still overlaps GH_LOOKUP_CONCURRENCY-ways so wall-clock stays low.
+const GH_LOOKUP_CONCURRENCY = Math.max(2, Math.min(8, (cpus()?.length ?? 4) - 2));
 
 export interface GhStatusEntry {
   release: string | null;
@@ -323,8 +334,10 @@ export async function ghStatusLookup(
       dedupCfgs.push(cfg);
     }
   }
-  const repos = await Promise.all(
-    dedupCfgs.map((cfg) => resolveGithubRepo(cfg.project, cfg)),
+  const repos = await mapWithConcurrency(
+    dedupCfgs,
+    GH_LOOKUP_CONCURRENCY,
+    (cfg) => resolveGithubRepo(cfg.project, cfg),
   );
   const unique: Record<string, { repo: string; path: string }> = {};
   for (let i = 0; i < dedupCfgs.length; i++) {
@@ -335,8 +348,10 @@ export async function ghStatusLookup(
   // subprocess latency scales with the slowest project instead of the sum of
   // every project's git rev-parse.
   const uniqueEntries = Object.entries(unique);
-  const localShaList = await Promise.all(
-    uniqueEntries.map(async ([, { path }]) => (path ? await localHead(path) : null)),
+  const localShaList = await mapWithConcurrency(
+    uniqueEntries,
+    GH_LOOKUP_CONCURRENCY,
+    async ([, { path }]) => (path ? await localHead(path) : null),
   );
   const localShas = new Map<string, string | null>();
   for (let i = 0; i < uniqueEntries.length; i++) {
@@ -387,8 +402,10 @@ export async function ghStatusLookup(
   }
 
   if (stale.length > 0) {
-    const results = await Promise.all(
-      stale.map(async ([projName, repo]) => {
+    const results = await mapWithConcurrency(
+      stale,
+      GH_LOOKUP_CONCURRENCY,
+      async ([projName, repo]) => {
         const { path } = unique[projName];
         try {
           const data = await fetchOneGhStatus(repo, path || undefined);
@@ -397,7 +414,7 @@ export async function ghStatusLookup(
         } catch {
           return null;
         }
-      })
+      },
     );
 
     for (const result of results) {

@@ -216,6 +216,8 @@ export interface UnfruitfulAgentDisableDeps {
     agentName: string;
     title: string;
     detail: string;
+    payload?: Record<string, unknown>;
+    status?: 'open' | 'dismissed' | 'applied' | 'resolved';
   }) => Promise<unknown>;
   log?: (msg: string) => void;
 }
@@ -301,12 +303,22 @@ export async function autoDisableUnfruitfulAgents(
         `re-enable it after adjusting its prompt, cadence, or backlog source.`;
 
     try {
+      // The agent is already disabled above, so this recommendation records a
+      // COMPLETED action rather than a pending decision. Create it `resolved`
+      // (mirrors the orchestrator_boost "already complete at creation" pattern)
+      // so it archives to History instead of sitting in the "Needs your
+      // decision" queue where it could never auto-clear (its cron is
+      // uninstalled, so no future run can resolve it). `enabled:false` in the
+      // payload stops the Fix menu from offering Run/Disable on an agent that
+      // is already off (see lib/attention/recommendation-actions.ts).
       await deps.recommend({
         project: agent.project,
         agentId: agent.id,
         agentName: agent.name,
         title,
         detail,
+        payload: { enabled: false },
+        status: 'resolved',
       });
     } catch (e) {
       deps.log?.(`[unfruitful-pause] recommendation failed for ${agent.project}/${agent.name}: ${e instanceof Error ? e.message : String(e)}`);
@@ -397,6 +409,8 @@ export async function runUnfruitfulPauseSweep(): Promise<UnfruitfulAgentDisableR
         type: 'agent_unfruitful',
         title: input.title,
         detail: input.detail,
+        payload: input.payload ?? null,
+        status: input.status ?? 'open',
       }),
     log: (m) => console.log(m),
   });
