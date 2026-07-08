@@ -40,10 +40,16 @@ describe('agent catalog', () => {
     }
   });
 
-  it('autoSeed=true implies dispatch=internal (no auto-seed for CLI templates)', () => {
-    for (const entry of AGENT_CATALOG) {
-      if (entry.autoSeed) {
-        expect(entry.dispatch, `'${entry.name}' is autoSeed but dispatch is not internal`).toBe('internal');
+  it('auto-seeded internal entries have a handler key; auto-seeded CLI entries do not', () => {
+    // Auto-seed is no longer internal-only: a `dispatch:'cli'` + `autoSeed:true`
+    // entry (e.g. `health`) seeds a normal kind:'user' agent that runs the intake
+    // workflow. The remaining invariant is the handler split.
+    for (const entry of autoSeededCatalogEntries()) {
+      if (entry.dispatch === 'internal') {
+        expect(entry.handlerKey, `internal auto-seed '${entry.name}' needs a handlerKey`).toBeTypeOf('string');
+      } else {
+        expect(entry.dispatch, `auto-seed '${entry.name}' must be cli or internal`).toBe('cli');
+        expect(entry.handlerKey, `cli auto-seed '${entry.name}' must not set handlerKey`).toBeUndefined();
       }
     }
   });
@@ -74,10 +80,15 @@ describe('agent catalog', () => {
 });
 
 describe('legacy recommended-agents facade', () => {
-  it('mirrors every CLI-dispatch catalog entry', () => {
-    const cliNames = catalogEntriesByDispatch('cli').map((e) => e.name).sort();
+  it('mirrors every non-auto-seeded CLI-dispatch catalog entry', () => {
+    // Auto-seeded CLI entries (e.g. `health`) are materialized per project by the
+    // seeder, so they are excluded from the manual "Add agent" template list.
+    const cliTemplateNames = catalogEntriesByDispatch('cli')
+      .filter((e) => !e.autoSeed)
+      .map((e) => e.name)
+      .sort();
     const recommendedNames = RECOMMENDED_AGENTS.map((a) => a.name).sort();
-    expect(recommendedNames).toEqual(cliNames);
+    expect(recommendedNames).toEqual(cliTemplateNames);
   });
 
   it('isBuiltInRecommendedAgent returns true only for CLI entries (not internal)', () => {
@@ -107,10 +118,16 @@ describe('legacy recommended-agents facade', () => {
 });
 
 describe('legacy system facade', () => {
-  it('SYSTEM_AGENTS contains every auto-seeded internal entry', () => {
-    const autoSeeded = autoSeededCatalogEntries().map((e) => e.name).sort();
+  it('SYSTEM_AGENTS contains every auto-seeded internal entry (CLI auto-seed has no handler)', () => {
+    // SYSTEM_AGENTS only maps internal-dispatch auto-seed entries to in-process
+    // handlers; auto-seeded CLI entries (e.g. `health`) run via the intake
+    // workflow and intentionally have no handler here.
+    const autoSeededInternal = autoSeededCatalogEntries()
+      .filter((e) => e.dispatch === 'internal')
+      .map((e) => e.name)
+      .sort();
     const systemKeys = Object.keys(SYSTEM_AGENTS).sort();
-    expect(systemKeys).toEqual(autoSeeded);
+    expect(systemKeys).toEqual(autoSeededInternal);
   });
 
   it('getSystemAgentHandler returns null for non-internal or non-auto-seeded names', () => {

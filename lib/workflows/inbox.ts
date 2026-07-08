@@ -17,6 +17,7 @@ import type { Task } from '@/lib/shared/types';
 
 export type InboxSignalType =
   | 'ci_red'
+  | 'app_down'
   | 'review_needs_decision'
   | 'pr_ready_to_merge'
   | 'pr_conflicts'
@@ -97,6 +98,9 @@ export interface InboxJob {
   dodVerified: number | null;
   dodTotal: number | null;
   dodIssueNumber: number | null;
+  /** For agent:health jobs: the persisted verdict (HEALTHY | DEGRADED | DOWN).
+   *  Null for every other kind. Drives the `app_down` signal. */
+  healthVerdict: string | null;
 }
 
 export interface InboxOpenPr {
@@ -288,6 +292,27 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         externalUrl: task.ci_failed_url,
         ageSeconds: null,
         action: { kind: 'fix-ci', label: 'Start fix-ci' },
+      });
+    }
+
+    // 1a. Deployed-app health DOWN → red blocker. The health monitor persists
+    //     its verdict on each agent:health job; surface the latest DOWN as a
+    //     HITL (a down production app is never silent — merge-or-HITL invariant).
+    //     A later HEALTHY/DEGRADED run supersedes it and this clause stops
+    //     emitting, so the signal self-clears on recovery.
+    const latestHealth = latestJob(jobs, project, 'agent:health');
+    if (latestHealth?.healthVerdict === 'DOWN') {
+      signals.push({
+        id: `app_down:${project}`,
+        type: 'app_down',
+        severity: 'red',
+        project,
+        title: 'Deployed app is DOWN',
+        detail: 'Health monitor reports the app is unreachable or not serving data. See its latest run and docs/HEALTH.md.',
+        href: projectHref(project),
+        externalUrl: null,
+        ageSeconds: null,
+        action: { kind: 'open-terminal', label: 'Investigate' },
       });
     }
 
@@ -596,6 +621,19 @@ export function countInboxSignals(signals: InboxSignal[]): InboxCounts {
   return counts;
 }
 
+// Read a health monitor job's persisted verdict (HEALTHY | DEGRADED | DOWN)
+// from contextMeta.healthVerdict.verdict. Null when absent/unparseable.
+function safeHealthVerdict(contextMeta: string | null | undefined): string | null {
+  if (!contextMeta) return null;
+  try {
+    const parsed = JSON.parse(contextMeta) as { healthVerdict?: { verdict?: unknown } };
+    const v = parsed.healthVerdict?.verdict;
+    return typeof v === 'string' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function safeReleaseStopReason(contextMeta: string | null | undefined): string | null {
   if (!contextMeta) return null;
   try {
@@ -790,6 +828,7 @@ async function computeInboxSignals(): Promise<InboxSignalsResult> {
       dodVerified: dod?.verified ?? null,
       dodTotal: dod?.total ?? null,
       dodIssueNumber: dod?.issueNumber ?? null,
+      healthVerdict: j.kind === 'agent:health' ? safeHealthVerdict(j.contextMeta) : null,
     };
   });
 

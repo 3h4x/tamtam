@@ -154,6 +154,7 @@ Read the relevant file before touching the subsystem it covers.
 | `docs/COMMANDS.md` | Server lifecycle, tests, DB, and profiling commands | Running TamTam, choosing the right rebuild/dev/test command, or updating command guidance |
 | `docs/DATABASE.md` | Drizzle/Postgres schema reference | Editing schema, writing queries, or reasoning about persisted runtime state |
 | `docs/E2E.md` | Playwright pipeline e2e harness | Deciding between unit vs pipeline e2e coverage or extending `e2e/pipeline/` |
+| `docs/HEALTH.md` | Default per-project health monitor agent | Changing the health agent, its verdict surfacing (`app_health` rec / `app_down` inbox), or the per-app `docs/HEALTH.md` brief contract |
 | `docs/ORCHESTRATOR.md` | Boost/health tick loop, recommendation types, AUTO-vs-MANUAL meaning, resolved/History lifecycle | Changing the orchestrator tick, fruitfulness/health signals, recommendation creation/auto-resolution, or the recommendations UI |
 | `docs/PIPELINE.md` | Release pipeline state machine and fix-loop rules | Changing release orchestration, phase transitions, retry caps, or guard behavior |
 | `docs/PROFILING.md` | Server, client, and Turbopack profiling workflow | Investigating CPU, HMR, or browser performance problems before making perf changes |

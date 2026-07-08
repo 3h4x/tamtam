@@ -9,6 +9,7 @@ import {
   waitForWorkflowReady,
 } from '@/instrumentation-node/boot-recovery';
 import { runProbeSweep } from '@/instrumentation-node/probe-sweep';
+import { isSubjectToDiffGates } from '@/lib/agents/roles';
 
 export { drainStalePendingReleases, reapOrphanReleases, waitForWorkflowReady } from '@/instrumentation-node/boot-recovery';
 export { runProbeSweep } from '@/instrumentation-node/probe-sweep';
@@ -334,10 +335,11 @@ export async function registerNode(): Promise<void> {
                   // runs are unaffected, and releases are not gated — so the red branch
                   // can still self-heal and ship. Fails open on a gh error, un-blocks
                   // automatically when CI goes green, and the red state is already
-                  // surfaced as the `ci_red` inbox HITL. `system` agents are exempt
-                  // (triage/monitoring/report — no diff-producing runs, mirroring the
-                  // saturation backoff below): they add no new work to the broken build.
-                  if (agent.kind !== 'system') {
+                  // surfaced as the `ci_red` inbox HITL. Non-producer roles and
+                  // `system` agents are exempt (monitor/reviewer/planner — no
+                  // diff-producing runs, mirroring the saturation backoff below):
+                  // they add no new work to the broken build.
+                  if (isSubjectToDiffGates(agent)) {
                     const { isDefaultBranchCiRed } = await import('@/lib/jobs/ci-dispatch-gate');
                     const ciGate = await isDefaultBranchCiRed(projPath);
                     if (ciGate.red) return skip('default-branch CI is red — deferring scheduled runs until CI is green (see /inbox)');
@@ -348,9 +350,9 @@ export async function registerNode(): Promise<void> {
                   // so the project-level auto-pause never fires for it. Skip the
                   // fire while THIS agent is persistently unfruitful AND no new
                   // commit has landed since it last ran (a HEAD move re-enables
-                  // it). Reuses the auto-pause-unfruitful settings; system
-                  // agents (no diff-producing runs) are exempt.
-                  if (agent.kind !== 'system') {
+                  // it). Reuses the auto-pause-unfruitful settings; non-producer
+                  // roles and system agents (no diff-producing runs) are exempt.
+                  if (isSubjectToDiffGates(agent)) {
                     const { getSettings } = await import('@/lib/shared/config');
                     const s = getSettings();
                     if (s.auto_pause_unfruitful_enabled && s.auto_pause_unfruitful_rate > 0) {

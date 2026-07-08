@@ -11,6 +11,14 @@ export interface SystemAgentSeedConfig {
   prompt: string;
   defaultSchedule: string;
   model: string;
+  // Auto-seed now materializes both internal (kind:'system') and CLI-dispatch
+  // (kind:'user') built-ins, so the seeded row's kind/role/boostable/skills
+  // come from the catalog entry rather than being hardcoded in the seeder.
+  kind: 'user' | 'system';
+  role: string;
+  boostable: boolean;
+  skillIds: string[];
+  fallbackEnabled: boolean;
 }
 
 export interface SystemAgentHandler {
@@ -26,6 +34,11 @@ function toSeedConfig(entry: AgentCatalogEntry): SystemAgentSeedConfig {
     prompt: entry.prompt,
     defaultSchedule: entry.defaultSchedule,
     model: entry.defaultModel,
+    kind: entry.dispatch === 'cli' ? 'user' : 'system',
+    role: entry.role ?? 'producer',
+    boostable: entry.boostable ?? true,
+    skillIds: entry.skillIds,
+    fallbackEnabled: entry.fallbackEnabled ?? false,
   };
 }
 
@@ -47,8 +60,14 @@ function resolveSystemAgentRun(entry: AgentCatalogEntry): SystemAgentRun | null 
   return null;
 }
 
+// Only internal-dispatch auto-seed entries have an in-process handler. CLI
+// auto-seed entries (e.g. `health`) run through the normal intake workflow and
+// have no handler here — mapping them through `toHandler` would throw at module
+// load, so filter to internal dispatch first.
 export const SYSTEM_AGENTS: Record<string, SystemAgentHandler> = Object.fromEntries(
-  autoSeededCatalogEntries().map((entry) => [entry.name, toHandler(entry)]),
+  autoSeededCatalogEntries()
+    .filter((entry) => entry.dispatch === 'internal')
+    .map((entry) => [entry.name, toHandler(entry)]),
 );
 
 export function getSystemAgentHandler(name: string): SystemAgentHandler | null {

@@ -462,6 +462,14 @@ export async function finalizeAgentRunReport(job: JobData, rawLog: string): Prom
     void maybeRecommendFruitfulness(job, ctx, actionable).catch((e) => {
       console.warn('[agent-run-report] fruitfulness recommendation failed:', e);
     });
+    if (job.kind === 'agent:health') {
+      // The health monitor produces no diff by design; its signal is the
+      // verdict, not a change. Persist it on the job and surface DEGRADED/DOWN.
+      void (async () => {
+        const { applyHealthVerdict } = await import('@/lib/agents/health-report');
+        await applyHealthVerdict(job, text);
+      })().catch((e) => console.warn('[agent-run-report] health verdict handling failed:', e));
+    }
   }
 
   // Best-effort: index completed run for future retrieval (fire-and-forget)

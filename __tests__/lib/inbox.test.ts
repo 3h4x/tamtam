@@ -54,6 +54,7 @@ function makeJob(overrides: Partial<InboxJob> & { project: string; kind: string 
     dodVerified: null,
     dodTotal: null,
     dodIssueNumber: null,
+    healthVerdict: null,
     ...overrides,
   };
 }
@@ -72,6 +73,30 @@ function baseInput(overrides: Partial<InboxInput> = {}): InboxInput {
 }
 
 describe('deriveInboxSignals', () => {
+  it('surfaces a red app_down when the latest health verdict is DOWN', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha', ci: 'success' })],
+        jobs: [makeJob({ project: 'alpha', kind: 'agent:health', startedAt: 500, healthVerdict: 'DOWN' })],
+      }),
+    );
+    const s = signals.find((x) => x.type === 'app_down' && x.project === 'alpha');
+    expect(s).toMatchObject({ type: 'app_down', severity: 'red', project: 'alpha' });
+  });
+
+  it('does not surface app_down when the latest health verdict is HEALTHY', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'alpha', ci: 'success' })],
+        jobs: [
+          makeJob({ project: 'alpha', kind: 'agent:health', startedAt: 400, healthVerdict: 'DOWN' }),
+          makeJob({ project: 'alpha', kind: 'agent:health', startedAt: 600, healthVerdict: 'HEALTHY' }),
+        ],
+      }),
+    );
+    expect(signals.some((x) => x.type === 'app_down')).toBe(false);
+  });
+
   it('flags a pr-wait that deferred auto-merge to a human (risky_diff) as needing manual merge', () => {
     const signals = deriveInboxSignals(
       baseInput({

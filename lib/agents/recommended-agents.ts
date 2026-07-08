@@ -33,11 +33,12 @@ function toTemplate(entry: AgentCatalogEntry): RecommendedAgentTemplate {
   };
 }
 
-// Surfaced templates are the CLI-dispatch catalog entries. Internal
-// (`documentation-reindex-vectors`) agents are auto-seeded, not offered as
-// templates, so they're excluded.
+// Surfaced templates are the CLI-dispatch catalog entries that are NOT
+// auto-seeded. Internal (`documentation-reindex-vectors`) and auto-seeded
+// CLI agents (`health`) are materialized per project by the seeder, so they
+// must not also appear as manual "Add agent" templates (would be a duplicate).
 export const RECOMMENDED_AGENTS: RecommendedAgentTemplate[] = AGENT_CATALOG
-  .filter((e) => e.dispatch === 'cli')
+  .filter((e) => e.dispatch === 'cli' && !e.autoSeed)
   .map(toTemplate);
 
 export function recommendedAgentNameKey(name: string): string {

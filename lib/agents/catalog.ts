@@ -12,8 +12,9 @@
 // (lib/agents/recommended-agents) are thin adapters that derive from this
 // catalog, so those call sites stay in sync automatically.
 
-import { ISSUE_CRUNCHER_SKILL_ID } from '@/lib/agents/skill-ids';
+import { ISSUE_CRUNCHER_SKILL_ID, HEALTH_SKILL_ID } from '@/lib/agents/skill-ids';
 import { DOCUMENTATION_REINDEX_VECTORS_AGENT_NAME } from '@/lib/agents/system/constants';
+import type { AgentRole } from '@/lib/agents/roles';
 
 export type AgentDispatch = 'cli' | 'internal';
 export type AgentTier = 'essential' | 'featured' | 'recommended';
@@ -51,6 +52,13 @@ export interface AgentCatalogEntry {
   /** When true, runs that fail on the primary provider may retry once on
    *  the fallback provider. Mirrors the legacy recommended-agent flag. */
   fallbackEnabled?: boolean;
+  /** Seeded agent role. Omitted ⇒ 'producer'. 'monitor' makes the agent
+   *  never diff-judged (never unfruitful / schedule-backed-off) and
+   *  model-downgrade-only under autopilot. See lib/agents/roles.ts. */
+  role?: AgentRole;
+  /** Seeded boostable flag. Omitted ⇒ true. false ⇒ the orchestrator never
+   *  boost-fires it; it runs only on its own schedule. */
+  boostable?: boolean;
   /** External references that inspired the agent — surfaced in the
    *  catalog UI so future maintainers can trace why a built-in exists
    *  and where its design vocabulary came from. */
@@ -79,6 +87,28 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
       'agents UI; schedule is managed from Settings > Retrieval.',
     skillIds: [],
     autoSeed: true,
+  },
+
+  // ── CLI-dispatch agent, auto-seeded per project (LLM-backed monitor) ──────
+  {
+    name: 'health',
+    description:
+      "Auto-managed: checks whether this project's deployed app is up where it " +
+      'should be, presents data, and is healthy — reading its logs. Reports a ' +
+      'verdict; DEGRADED surfaces in recommendations, DOWN as a red inbox blocker. ' +
+      "Read-only. Configure per-app checks in the project's docs/HEALTH.md.",
+    dispatch: 'cli',
+    autoSeed: true,
+    role: 'monitor',
+    boostable: false,
+    defaultSchedule: '1h',
+    defaultModel: 'claude-haiku-4-5-20251001',
+    prompt:
+      'Run the project health monitor for this project: is the deployed app up ' +
+      'where it should be, does it present data, is it healthy? Read its logs. ' +
+      'Follow the agent-health skill and end with a HEALTH_VERDICT line.',
+    skillIds: [HEALTH_SKILL_ID],
+    fallbackEnabled: true,
   },
 
   // ── CLI-dispatch agents (templates; not auto-seeded) ──────────────────────

@@ -154,7 +154,10 @@ for the full Phase 1 design.
   silenced permanently, just stops re-scanning an unchanged tree. Complements (not
   replaces) the autopilot **cadence-throttle** (which only *slows*, floor-bounded,
   never stops) and the operator-facing `agent_schedule_backoff` recommendation.
-  Gated by `auto_pause_unfruitful_enabled`; system agents are exempt; the skip
+  Gated by `auto_pause_unfruitful_enabled`; **non-producer roles and system
+  agents are exempt** (via `isSubjectToDiffGates(agent)` in `lib/agents/roles.ts`
+  — a monitor/reviewer/planner produces 0 diffs by design, so a HEAD-stable streak
+  is not saturation); the same guard applies to the CI-red gate above. The skip
   re-enqueues at the normal schedule interval so it re-checks next tick.
 - **Health** (`agent-health-analysis.ts`): an LLM reviews the agent's last 3
   runs and returns a verdict (`concern` + `concernType` like loop/noise). On a

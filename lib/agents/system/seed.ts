@@ -1,8 +1,13 @@
-// Auto-seeds built-in system agents for every enabled project. Runs once
-// at TamTam boot and again whenever a project is created. Idempotent —
-// a row with the same (project, name) is left alone. A dismissal marker
-// (settings key `system_agent_dismissed:<project>:<name>`) lets users
-// hard-delete a system agent without it getting recreated on next boot.
+// Auto-seeds built-in agents for every enabled project. Runs once at TamTam
+// boot and again whenever a project is created. Idempotent — a row with the
+// same (project, name) is left alone. A dismissal marker (settings key
+// `system_agent_dismissed:<project>:<name>`) lets users hard-delete a seeded
+// agent without it getting recreated on next boot.
+//
+// The seeded row's kind/role/boostable/skills come from the catalog entry:
+// internal-dispatch entries seed as kind:'system' (in-process handler),
+// CLI-dispatch entries (e.g. `health`) seed as kind:'user' and run through the
+// normal intake workflow like any user agent.
 
 import { eq, like } from 'drizzle-orm';
 import { db, schema } from '@/lib/db';
@@ -85,16 +90,18 @@ async function seedOneAgentForOneProject(
       id: buildAgentId(project, seed.name),
       name: seed.name,
       project,
-      skillIds: '[]',
+      skillIds: JSON.stringify(seed.skillIds),
       model: seed.model,
       prompt: seed.prompt,
       schedule: effectiveScheduleFor(seed),
       enabled: true,
       docPaths: '[]',
       provider: null,
-      fallbackEnabled: false,
+      fallbackEnabled: seed.fallbackEnabled,
       prerequisiteCommand: null,
-      kind: 'system',
+      kind: seed.kind,
+      role: seed.role,
+      boostable: seed.boostable,
       createdAt: now,
       updatedAt: now,
     }).execute();

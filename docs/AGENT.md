@@ -162,6 +162,8 @@ Current entries:
 
 - **`documentation-reindex-vectors`** (`lib/agents/system/retrieval-maintenance.ts`) — keeps the pgvector retrieval index in sync. On each fire: detects embedding-model drift via `retrieval_records.embedding_model` and wipes that project's chunks if the configured model has changed; calls `reindexProject()` (`lib/agents/retrieval/reindex-project.ts`) — the same code path the manual reindex API uses; finally issues a sample retrieval query and, when `outcome_classifier_model` is non-empty, asks the cheap LLM (default `gemma3:4b`) whether the snippets look like real on-topic content for the project. The verdict (`ok` | `problem` | `null`) plus reindex stats land on `contextMeta.retrievalHealth`. See `docs/SETTINGS.md` → "Built-in documentation-reindex-vectors agent" for the operator-facing description.
 
+Auto-seed is not limited to system (`kind:'system'`) agents. A catalog entry with `dispatch:'cli'` + `autoSeed:true` seeds a normal `kind:'user'` agent per project, with its `role`/`boostable`/`skillIds` taken from the catalog entry (`lib/agents/system/seed.ts`). The built-in **`health`** monitor uses this path (`role:'monitor'`, `boostable:false`) so it runs the standard LLM-CLI intake workflow rather than an in-process handler — see `docs/HEALTH.md`. (`SYSTEM_AGENTS` in `lib/agents/system/index.ts` therefore maps only the `dispatch:'internal'` auto-seed entries to handlers.)
+
 Settings hooks that interact with system agents:
 
 - Changing `retrieval_embedding_model` in `/settings/general` fires every `documentation-reindex-vectors` agent immediately (`quickAddJob('agent-cron', …, { runAt: new Date() })`) so the wipe+reindex starts at once instead of waiting up to one schedule interval.

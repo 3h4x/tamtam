@@ -47,6 +47,16 @@ export function valueIsDiffBased(role: AgentRole): boolean {
   return role === 'producer';
 }
 
+/** True only for agents whose runs are legitimately judged by code diffs — a
+ *  non-system producer. Monitors / reviewers / planners (and any system agent)
+ *  produce 0 diffs by design, so the diff-based cron dispatch gates (the CI-red
+ *  deferral and the saturation backoff) must NOT silence them: a no-diff run is
+ *  a successful pass, not saturation. Use this at those gate call sites so a
+ *  monitor keeps its cadence instead of going quiet after a HEAD-stable streak. */
+export function isSubjectToDiffGates(agent: { kind?: string | null; role: AgentRole }): boolean {
+  return agent.kind !== 'system' && valueIsDiffBased(agent.role);
+}
+
 /** Producers are the only role the cadence autopilot may slow down. Monitors,
  *  reviewers and planners must keep their cadence (freshness); publishers are
  *  exempt entirely. */
