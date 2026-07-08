@@ -102,7 +102,7 @@ export const AGENT_CATALOG: AgentCatalogEntry[] = [
     role: 'monitor',
     boostable: false,
     defaultSchedule: '1h',
-    defaultModel: 'claude-haiku-4-5-20251001',
+    defaultModel: 'fast', // cheapest tier (Haiku) — a monitor doesn't need a big model; operator-tunable
     prompt:
       'Run the project health monitor for this project: is the deployed app up ' +
       'where it should be, does it present data, is it healthy? Read its logs. ' +

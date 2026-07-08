@@ -5,7 +5,7 @@ description: "Check whether the deployed app is up where it should be, presents 
 version: "2026-07-08"
 agent:
   defaultSchedule: 1h
-  defaultModel: claude-haiku-4-5-20251001
+  defaultModel: fast
   fallbackEnabled: true
 ---
 

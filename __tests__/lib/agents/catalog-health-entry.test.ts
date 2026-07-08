@@ -12,7 +12,7 @@ describe('health catalog entry', () => {
     expect(e!.role).toBe('monitor');
     expect(e!.boostable).toBe(false);
     expect(e!.defaultSchedule).toBe('1h');
-    expect(e!.defaultModel).toBe('claude-haiku-4-5-20251001');
+    expect(e!.defaultModel).toBe('fast');
     expect(e!.skillIds).toContain(HEALTH_SKILL_ID);
   });
 

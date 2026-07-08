@@ -152,7 +152,7 @@ describe('system-agent seed', () => {
     expect(health!.role).toBe('monitor');
     expect(health!.boostable).toBe(false);
     expect(health!.schedule).toBe('1h');
-    expect(health!.model).toBe('claude-haiku-4-5-20251001');
+    expect(health!.model).toBe('fast');
     expect(JSON.parse(health!.skillIds)).toContain('agent-health');
   });
 
