@@ -270,8 +270,21 @@ export function useTerminalBootstrap({
     jobLoadedRef.current = jobParam
     const loadJob = async () => {
       try {
-        const res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
-        if (!res.ok) return
+        // Single retry: a freshly-restarted server can return 500 briefly, and a
+        // silent bail here would strand the operator on an empty terminal with no
+        // explanation (the "Show details → empty terminal" report). Retry once,
+        // then surface a clear, actionable message instead of rendering nothing.
+        let res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
+        if (!res.ok) {
+          await new Promise((r) => setTimeout(r, 1000))
+          res = await fetch(`/api/jobs/${encodeURIComponent(jobParam)}`)
+        }
+        if (!res.ok) {
+          terminalStore.update(projectName, () => ({
+            history: [{ role: 'error', text: `Couldn't load run ${jobParam} (HTTP ${res.status}). The server may still be starting — reload the page to retry.` }],
+          }))
+          return
+        }
         const data = await res.json()
         if (shouldRedirectJobParamToSession(data)) {
           router.replace(`/project/${encodeURIComponent(projectName)}/terminal/${encodeURIComponent(data.session_id)}`)
@@ -357,7 +370,11 @@ export function useTerminalBootstrap({
           terminalStore.update(projectName, () => ({ history: entries }))
           terminalStore.startStream(projectName, jobParam, false, true)
         }
-      } catch {}
+      } catch {
+        terminalStore.update(projectName, () => ({
+          history: [{ role: 'error', text: `Couldn't load run ${jobParam}. The server may be unavailable — reload the page to retry.` }],
+        }))
+      }
     }
     loadJob()
   }, [jobParam, initialSessionId, projectName])

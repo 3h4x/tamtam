@@ -10,6 +10,7 @@ import {
   countInboxSignals,
   rollupIsGreen,
   selectRepresentativePr,
+  parseRefusedBranchFromStopReason,
   type InboxInput,
   type InboxJob,
 } from '@/lib/workflows/inbox';
@@ -71,6 +72,26 @@ function baseInput(overrides: Partial<InboxInput> = {}): InboxInput {
     ...overrides,
   };
 }
+
+describe('parseRefusedBranchFromStopReason', () => {
+  it('extracts the branch name from a non-default-branch refusal', () => {
+    expect(
+      parseRefusedBranchFromStopReason(
+        'release first-step failed: Refusing to run tests on non-default branch fix/api-consistency: GitHub author claude is not in safe_users.',
+      ),
+    ).toBe('fix/api-consistency');
+  });
+  it('handles the "review"/other action-label variants', () => {
+    expect(
+      parseRefusedBranchFromStopReason('Refusing to review on non-default branch feature/x: could not list branch commits.'),
+    ).toBe('feature/x');
+  });
+  it('returns null for stop reasons that name no branch', () => {
+    expect(parseRefusedBranchFromStopReason('review cap reached')).toBeNull();
+    expect(parseRefusedBranchFromStopReason(null)).toBeNull();
+    expect(parseRefusedBranchFromStopReason('')).toBeNull();
+  });
+});
 
 describe('deriveInboxSignals', () => {
   it('surfaces a red app_down when the latest health verdict is DOWN', () => {
@@ -362,6 +383,60 @@ describe('deriveInboxSignals', () => {
     const s = signals.find((x) => x.type === 'fix_loop_exhausted');
     expect(s).toMatchObject({ severity: 'red', action: { kind: 'open-terminal' } });
     expect(s?.detail).toMatch(/without shipping|needs a human/i);
+  });
+
+  it('RE-VERIFIES a non-default-branch refusal: suppresses when the project has moved OFF that branch (branch is stale)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason:
+              'release first-step failed: Refusing to run tests on non-default branch fix/api-consistency: GitHub author claude for commit e8c2a619 is not in safe_users / trusted_github_users.',
+          }),
+        ],
+        // Project is now back on the default branch — the fix/api-consistency work was abandoned.
+        currentBranchByProject: { gamma: 'main' },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeUndefined();
+  });
+
+  it('KEEPS the non-default-branch refusal when the project is STILL on that branch (actionable)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [
+          makeJob({
+            project: 'gamma',
+            kind: 'release',
+            startedAt: 500,
+            finishedAt: 900,
+            exitCode: 1,
+            releaseStopReason:
+              'release first-step failed: Refusing to run tests on non-default branch fix/api-consistency: GitHub author claude is not in safe_users.',
+          }),
+        ],
+        currentBranchByProject: { gamma: 'fix/api-consistency' },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
+  });
+
+  it('does NOT suppress a non-branch stop reason even when a current branch is known (re-verify only applies to branch refusals)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'gamma' })],
+        jobs: [makeJob({ project: 'gamma', kind: 'release', startedAt: 500, finishedAt: 900, exitCode: 1, releaseStopReason: 'review cap reached' })],
+        currentBranchByProject: { gamma: 'main' },
+      }),
+    );
+    expect(signals.find((x) => x.type === 'fix_loop_exhausted')).toBeTruthy();
   });
 
   it('does not double-signal a release already surfaced as a manual merge', () => {

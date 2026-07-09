@@ -95,7 +95,8 @@ The `rebuild` script is now graceful by default (`scripts/rebuild-safe.sh`): it 
 - Verify with `pnpm type-check`, `pnpm lint`, and targeted tests. After changes you may run `pnpm run rebuild` ad-hoc to make them live — the graceful rebuild script (`scripts/rebuild-safe.sh`) pauses jobs, drains running work, serves a placeholder on the TamTam port, builds, runs `pnpm db:migrate`, restarts, smoke-probes, and unpauses, so an ad-hoc rebuild from an interactive/dev session is safe and self-recovering. Then do visual checks against the freshly-rebuilt app. **Exception — never rebuild from inside a TamTam-spawned in-process agent job**: the drain step waits for that very job to finish (deadlock) and `pm2 stop tamtam` would kill the server the job runs under. In that context, leave the rebuild to an out-of-band session.
 - Use Playwright only via MCP (`mcp__playwright__*` / Playwright MCP tools) to navigate and screenshot. Do not launch Playwright, Puppeteer, Chrome, or Chromium from shell in Codex sandboxed sessions; browser process launch is blocked there. Chrome DevTools MCP is unreliable — prefer Playwright MCP.
 - Test golden path + key edge cases visually; check adjacent features for regressions.
-- Do **NOT** claim frontend work complete without the Playwright screenshot step.
+- **Actually exercise every new interactive element in Playwright — click each new button/link and confirm the destination renders the expected content.** A screenshot of a static row, or asserting an action's `href` in the accessibility snapshot, does **NOT** prove the action works: a link can point at the right URL yet land on an empty/failed view (e.g. a `?job=` replay that silently bails on a cold-start 500). If you write UI, you drive it end-to-end in Playwright — otherwise the work is unverified and you are wasting time.
+- Do **NOT** claim frontend work complete without the Playwright screenshot step **and** click-through of every new action.
 
 ## Key Patterns
 

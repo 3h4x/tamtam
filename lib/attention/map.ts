@@ -31,13 +31,15 @@ export function inboxSignalToItem(s: InboxSignal): AttentionItem {
 
 // A recommendation is never red: MANUAL (operator must act) → yellow, AUTO
 // (orchestrator already handled it, FYI) → green. Red stays reserved for
-// shippability blockers from the inbox side.
+// shippability blockers from the inbox side. `app_health` is operator-actionable
+// (a DEGRADED/DOWN app needs a human) but is classified outside the MANUAL agent-
+// quality set, so it is pinned yellow here rather than defaulting to green/AUTO.
 export function recommendationToItem(rec: RecommendationRow): AttentionItem {
   return {
     id: `rec:${rec.id}`,
     source: 'recommendation',
     project: rec.project,
-    severity: isManualRecommendation(rec.type) ? 'yellow' : 'green',
+    severity: rec.type === 'app_health' || isManualRecommendation(rec.type) ? 'yellow' : 'green',
     title: rec.title,
     detail: rec.detail,
     ageSeconds: rec.updated_at ? Math.max(0, Math.floor(Date.now() / 1000 - rec.updated_at)) : null,

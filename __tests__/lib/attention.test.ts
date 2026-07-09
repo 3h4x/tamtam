@@ -133,6 +133,36 @@ describe('recommendationActions', () => {
     const dec = acts.find((a) => a.kind === 'decrease-rate');
     expect(dec?.payloadArg).toBeTruthy();
   });
+
+  it('gives an app_health rec Show-details + Open-terminal nav links + dismiss (not the agent-tuning menu)', () => {
+    const acts = recommendationActions(
+      rec({ type: 'app_health', source_id: 'health-job', payload: { verdict: 'DEGRADED', reason: 'HTTP 413 on registry sync' } }),
+    );
+    expect(acts.map((a) => a.kind)).toEqual(['view-logs', 'open-terminal', 'dismiss']);
+
+    const details = acts.find((a) => a.kind === 'view-logs');
+    expect(details?.label).toBe('Show details →');
+    expect(details?.href).toContain('/terminal?job=health-job');
+
+    const term = acts.find((a) => a.kind === 'open-terminal');
+    expect(term?.label).toBe('Open terminal →');
+    expect(term?.href).toContain('/terminal?draft=');
+    // The starter prompt carries the verdict + reason so the terminal opens ready to act.
+    const decoded = decodeURIComponent(term?.href ?? '');
+    expect(decoded).toContain('DEGRADED');
+    expect(decoded).toContain('HTTP 413 on registry sync');
+
+    // Never the agent-quality tuning actions — a health finding is about the app, not the monitor.
+    expect(acts.map((a) => a.kind)).not.toContain('run-now');
+    expect(acts.map((a) => a.kind)).not.toContain('disable');
+  });
+
+  it('falls back to rec.detail for the app_health draft when payload has no reason', () => {
+    const term = recommendationActions(
+      rec({ type: 'app_health', detail: 'app returns 5xx', payload: { verdict: 'DOWN' } }),
+    ).find((a) => a.kind === 'open-terminal');
+    expect(decodeURIComponent(term?.href ?? '')).toContain('app returns 5xx');
+  });
 });
 
 describe('recommendationToItem', () => {
@@ -145,5 +175,11 @@ describe('recommendationToItem', () => {
 
   it('maps an AUTO rec → green', () => {
     expect(recommendationToItem(rec({ type: 'orchestrator_boost' })).severity).toBe('green');
+  });
+
+  it('maps an app_health rec → yellow (operator-actionable, not green AUTO) with terminal actions', () => {
+    const item = recommendationToItem(rec({ type: 'app_health', payload: { verdict: 'DEGRADED', reason: 'x' } }));
+    expect(item.severity).toBe('yellow');
+    expect(item.actions.map((a) => a.kind)).toEqual(['view-logs', 'open-terminal', 'dismiss']);
   });
 });

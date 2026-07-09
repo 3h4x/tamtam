@@ -142,7 +142,11 @@ export function TerminalTab({ projectName, initialSessionId }: TerminalTabProps)
     }))
 
   // Purely local UI state
-  const [input, setInput] = useState('')
+  // `?draft=` PRE-FILLS the composer without submitting (unlike `?prompt=`, which
+  // auto-runs) — e.g. opened from an inbox health alert so the operator lands with
+  // the problem stated, then edits/sends at will. Seeded once from the URL.
+  const draftParam = searchParams.get('draft')
+  const [input, setInput] = useState(draftParam ?? '')
   const [model, setModel] = useState<ModelTier>('fast')
   const [selectedProvider, setSelectedProvider] = useState<CliProvider | null>(null)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('auto')

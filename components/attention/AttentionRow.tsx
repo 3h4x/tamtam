@@ -84,6 +84,11 @@ export function AttentionRow({
 
   const busy = busyKind !== null
   const single = menuActions.length === 1 && menuActions[0] ? menuActions[0] : null
+  // A menu whose actions are ALL navigation links (e.g. a health alert's
+  // "Show details →" + "Open terminal →") carries no mutation, so surface them
+  // inline as visible buttons rather than hiding them behind a "Fix ▾" dropdown.
+  // Mixed/mutating menus (agent-quality recs) keep the dropdown.
+  const allLinks = menuActions.length > 1 && menuActions.every(isLinkAction)
 
   return (
     <div className="border border-border rounded-lg bg-bg-secondary">
@@ -135,8 +140,19 @@ export function AttentionRow({
                 {busyKind === single.kind ? '…' : single.label}
               </Button>
             ))}
-          {/* Multiple actions (a recommendation's Fix menu) render as a dropdown. */}
-          {menuActions.length > 1 && (
+          {/* All-nav-link menus render inline as visible link buttons. */}
+          {allLinks &&
+            menuActions.map((action) => (
+              <Link
+                key={action.kind}
+                href={hrefForAction(action, item)}
+                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+              >
+                {action.label}
+              </Link>
+            ))}
+          {/* Multiple mutating actions (a recommendation's Fix menu) render as a dropdown. */}
+          {menuActions.length > 1 && !allLinks && (
             <details className="relative group">
               <summary
                 className={buttonVariants({

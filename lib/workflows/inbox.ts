@@ -7,6 +7,7 @@ import { db, schema } from '@/lib/db';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 import { latestCountableFailureFinishedAt } from '@/lib/pipeline/circuit-breaker-resume';
+import { getCurrentBranchSync } from '@/lib/git/git-branch';
 import { swrGet, type SwrStore } from '@/lib/shared/swr-cache';
 import type { Task } from '@/lib/shared/types';
 
@@ -142,6 +143,12 @@ export interface InboxInput {
    *  year's snow." Optional/absent for pauses that predate timestamp storage;
    *  the derivation then falls back to the tripping failure's finish time. */
   pausedAtByProject?: Record<string, number>;
+  /** Current git branch per project (impurely resolved by computeInboxSignals for
+   *  projects whose latest release failed on a non-default branch). Lets the
+   *  failed-release HITL RE-VERIFY against reality: a "refused on non-default
+   *  branch X" failure is stale once the project is no longer on X. Optional so
+   *  fixtures/tests that don't set it simply skip the re-verification. */
+  currentBranchByProject?: Record<string, string>;
   nowSeconds: number;
 }
 
@@ -238,13 +245,25 @@ function projectHref(project: string): string {
   return `/project/${encodeURIComponent(project)}`;
 }
 
+// The PR-branch execution gate (lib/security/pr-branch-execution.ts) refuses a
+// test/review on a non-default branch and stamps a stop reason of the form
+// "Refusing to <action> on non-default branch <name>: <why>". Extract <name> so
+// the inbox can re-verify the failed-release HITL: if the project has since moved
+// OFF that branch, the refused run is stale (the work was abandoned/superseded)
+// and must not keep nagging. Git ref names contain no spaces or colons, so the
+// capture is unambiguous. Returns null for any stop reason that names no branch.
+export function parseRefusedBranchFromStopReason(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return reason.match(/non-default branch ([^\s:]+)/)?.[1] ?? null;
+}
+
 /**
  * Pure signal derivation. Given the current cross-project state, return one
  * row per actionable signal, sorted red → yellow → green and, within a
  * severity, oldest-first (most urgent). Exported for unit testing.
  */
 export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
-  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, pausedReasonByProject, pausedAtByProject = {}, nowSeconds } = input;
+  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, pausedReasonByProject, pausedAtByProject = {}, currentBranchByProject = {}, nowSeconds } = input;
   const signals: InboxSignal[] = [];
 
   for (const task of tasks) {
@@ -465,7 +484,19 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         /push/i.test(release.releaseStopReason) &&
         task.changes === 0 &&
         task.unpushed === 0;
-      if (!coveredByMerge && !reDriving && !shippedByMerge && !shippedByPush) {
+      // RE-VERIFY the failure against current reality: a "refused on non-default
+      // branch X" release is only actionable while the project is still ON X. A
+      // first-step branch refusal never pushed/opened a PR, so once the project
+      // has moved OFF X (e.g. back to the default branch) the branch is abandoned
+      // — the HITL is unactionable and must self-clear instead of accumulating.
+      // Scoped to the branch-refusal class (the only stop reason that names a
+      // branch) and only suppresses on a POSITIVE mismatch (branch parsed AND a
+      // current branch is known AND they differ) so an unknown/failed lookup
+      // fails safe and keeps surfacing. Still on X → keep surfacing (actionable).
+      const refusedBranch = parseRefusedBranchFromStopReason(release.releaseStopReason);
+      const currentBranch = currentBranchByProject[project];
+      const movedOffRefusedBranch = !!refusedBranch && !!currentBranch && currentBranch !== refusedBranch;
+      if (!coveredByMerge && !reDriving && !shippedByMerge && !shippedByPush && !movedOffRefusedBranch) {
         // A cancelled/interrupted release (exit -2/-3: killed by a restart, the
         // probe sweep, or a manual cancel — isCancelledExitCode) with NO recorded
         // stop reason is not a genuine pipeline failure. The rest of the system
@@ -849,6 +880,30 @@ async function computeInboxSignals(): Promise<InboxSignalsResult> {
     listPausedAt().catch(() => ({})),
   ]);
 
+  // Re-verification input for the failed-release HITL: resolve the current branch
+  // ONLY for projects whose latest release failed on a named non-default branch
+  // (the branch-refusal class). Bounded to those few projects so we don't restart
+  // the git fan-out storm; getCurrentBranchSync is cached (2s TTL) besides.
+  const currentBranchByProject: Record<string, string> = {};
+  for (const task of tasks) {
+    let latestRelease: InboxJob | null = null;
+    for (const j of jobs) {
+      if (j.project !== task.project || j.kind !== 'release') continue;
+      if (!latestRelease || j.startedAt > latestRelease.startedAt) latestRelease = j;
+    }
+    if (
+      latestRelease &&
+      latestRelease.finishedAt !== null &&
+      latestRelease.exitCode !== 0 &&
+      parseRefusedBranchFromStopReason(latestRelease.releaseStopReason) &&
+      task.path
+    ) {
+      try {
+        currentBranchByProject[task.project] = getCurrentBranchSync(task.path);
+      } catch { /* fail safe — absence keeps the HITL surfacing */ }
+    }
+  }
+
   const signals = deriveInboxSignals({
     tasks,
     jobs,
@@ -857,6 +912,7 @@ async function computeInboxSignals(): Promise<InboxSignalsResult> {
     openPrNumbersByProject,
     pausedReasonByProject,
     pausedAtByProject,
+    currentBranchByProject,
     nowSeconds: Date.now() / 1000,
   });
   return { signals, counts: countInboxSignals(signals) };

@@ -44,8 +44,40 @@ function isUserEditableAgentId(agentId: string | null): boolean {
 }
 const termHref = (project: string, job: string) =>
   `/project/${encodeURIComponent(project)}/terminal?job=${encodeURIComponent(job)}`;
+// A terminal deep-link that PRE-FILLS a starter prompt (no auto-submit — see the
+// `?draft=` handling in TerminalTab) so the operator lands ready to edit/send.
+const termDraftHref = (project: string, draft: string) =>
+  `/project/${encodeURIComponent(project)}/terminal?draft=${encodeURIComponent(draft)}`;
+
+// A health finding (`app_health`, from the read-only health monitor) is not an
+// agent-quality recommendation — the operator's next move is to SEE what the
+// monitor found and then act on the app, not to tune the monitor. So it gets its
+// own two navigation actions instead of the generic Fix menu: "Show details →"
+// (the health run's full output) and "Open terminal →" (a fresh terminal
+// pre-filled with the problem, ready to prompt a fix). Both are nav links, so
+// the row renders them inline rather than in a Fix ▾ dropdown.
+function appHealthActions(rec: RecommendationRow): AttentionAction[] {
+  const out: AttentionAction[] = [];
+  const payload = (rec.payload && typeof rec.payload === 'object' ? rec.payload : {}) as Record<string, unknown>;
+  const jobId = recommendationSourceJobId(rec.payload) ?? rec.source_id;
+  if (jobId) out.push({ kind: 'view-logs', label: 'Show details →', href: termHref(rec.project, jobId) });
+  const verdict = str(payload.verdict) ?? 'DEGRADED';
+  // Trim trailing sentence punctuation so the appended ". Investigate…" reads
+  // cleanly (a reason that already ends in "." must not produce "logs.. Invest…").
+  const reason = (str(payload.reason) ?? str(rec.detail) ?? '').replace(/[.\s]+$/, '');
+  const draft =
+    `The health monitor reports the ${rec.project} app is ${verdict}` +
+    (reason ? `: ${reason}` : '') +
+    '. Investigate the root cause from the deploy/logs and propose a concrete fix. ' +
+    'Confirm the diagnosis before changing anything.';
+  out.push({ kind: 'open-terminal', label: 'Open terminal →', href: termDraftHref(rec.project, draft) });
+  out.push({ kind: 'dismiss', label: 'Dismiss', recommendationId: rec.id });
+  return out;
+}
 
 export function recommendationActions(rec: RecommendationRow): AttentionAction[] {
+  if (rec.type === 'app_health') return appHealthActions(rec);
+
   const out: AttentionAction[] = [];
   const rid = rec.id;
   const showFixMenu = Boolean(rec.agent_id) && isManualRecommendation(rec.type);
