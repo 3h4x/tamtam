@@ -20,6 +20,11 @@
 // it does not nag. Stored in `settings` under `paused_reason:<project>` to avoid
 // a schema migration; cleared on resume.
 const PAUSE_REASON_PREFIX = 'paused_reason:';
+// Companion to the reason: WHEN the system pause happened (epoch seconds, as a
+// string). Lets the inbox DATE the `project_paused` HITL — a resumable pause with
+// no age reads as stale "last year's snow." Stamped alongside the reason and
+// cleared with it, so the two never drift. Stored in `settings` (no migration).
+const PAUSE_AT_PREFIX = 'paused_at:';
 
 export async function setPauseReason(project: string, reason: string): Promise<void> {
   try {
@@ -27,6 +32,12 @@ export async function setPauseReason(project: string, reason: string): Promise<v
     await db.insert(schema.settings)
       .values({ key: `${PAUSE_REASON_PREFIX}${project}`, value: reason })
       .onConflictDoUpdate({ target: schema.settings.key, set: { value: reason } })
+      .execute();
+    // Stamp the pause moment in the same call so every recorded reason is dated.
+    const at = String(Math.floor(Date.now() / 1000));
+    await db.insert(schema.settings)
+      .values({ key: `${PAUSE_AT_PREFIX}${project}`, value: at })
+      .onConflictDoUpdate({ target: schema.settings.key, set: { value: at } })
       .execute();
   } catch (err) {
     console.error(`[pause-project] setPauseReason(${project}) failed:`, err);
@@ -36,8 +47,10 @@ export async function setPauseReason(project: string, reason: string): Promise<v
 export async function clearPauseReason(project: string): Promise<void> {
   try {
     const { db, schema } = await import('@/lib/db');
-    const { eq } = await import('drizzle-orm');
-    await db.delete(schema.settings).where(eq(schema.settings.key, `${PAUSE_REASON_PREFIX}${project}`)).execute();
+    const { inArray } = await import('drizzle-orm');
+    await db.delete(schema.settings)
+      .where(inArray(schema.settings.key, [`${PAUSE_REASON_PREFIX}${project}`, `${PAUSE_AT_PREFIX}${project}`]))
+      .execute();
   } catch { /* non-fatal */ }
 }
 
@@ -48,6 +61,23 @@ export async function listPauseReasons(): Promise<Record<string, string>> {
     const rows = await db.select().from(schema.settings).where(like(schema.settings.key, `${PAUSE_REASON_PREFIX}%`));
     const out: Record<string, string> = {};
     for (const r of rows) if (r.value) out[r.key.slice(PAUSE_REASON_PREFIX.length)] = r.value;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Epoch-second pause timestamps per project (from `paused_at:<project>`). */
+export async function listPausedAt(): Promise<Record<string, number>> {
+  try {
+    const { db, schema } = await import('@/lib/db');
+    const { like } = await import('drizzle-orm');
+    const rows = await db.select().from(schema.settings).where(like(schema.settings.key, `${PAUSE_AT_PREFIX}%`));
+    const out: Record<string, number> = {};
+    for (const r of rows) {
+      const n = Number(r.value);
+      if (Number.isFinite(n)) out[r.key.slice(PAUSE_AT_PREFIX.length)] = n;
+    }
     return out;
   } catch {
     return {};
@@ -70,6 +100,32 @@ export async function pauseProject(projectName: string, reason?: string): Promis
     return true;
   } catch (err) {
     console.error(`[pause-project] pauseProject(${projectName}) failed:`, err);
+    return false;
+  }
+}
+
+/**
+ * Inverse of {@link pauseProject}: flip `projects.paused = false` and clear any
+ * recorded auto-pause reason + timestamp so the inbox `project_paused` HITL
+ * self-resolves. Mirrors the resume side effects of the PATCH
+ * /api/projects/by-project route without crossing the HTTP boundary — used by
+ * the circuit-breaker auto-resume reconciler. Returns true on success.
+ */
+export async function resumeProject(projectName: string): Promise<boolean> {
+  try {
+    const { db, schema } = await import('@/lib/db');
+    const { eq } = await import('drizzle-orm');
+    const { clearProjectDataCache } = await import('@/lib/shared/project-data');
+    const { refreshProjectsCacheSync } = await import('@/lib/shared/enabled-projects');
+    await db.update(schema.projects)
+      .set({ paused: false })
+      .where(eq(schema.projects.name, projectName));
+    await clearPauseReason(projectName);
+    clearProjectDataCache();
+    await refreshProjectsCacheSync();
+    return true;
+  } catch (err) {
+    console.error(`[pause-project] resumeProject(${projectName}) failed:`, err);
     return false;
   }
 }

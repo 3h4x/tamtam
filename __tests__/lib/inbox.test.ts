@@ -618,6 +618,43 @@ describe('deriveInboxSignals', () => {
     expect(s?.detail).toBe('Circuit breaker: 3 failed runs in 60min')
   })
 
+  it('DATES the project_paused signal from the recorded pausedAt (no more "last year\'s snow")', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker: 3 failed runs in 60min' },
+        pausedAtByProject: { zeta: 7000 },
+        nowSeconds: 10_000,
+      }),
+    )
+    const s = signals.find((x) => x.type === 'project_paused')
+    expect(s?.ageSeconds).toBe(3000)
+  })
+
+  it('DATES the project_paused signal from the tripping failure when no explicit pausedAt exists (older pauses)', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker: 3 failed runs in 60min' },
+        // No pausedAtByProject entry — fall back to the most recent countable failure.
+        jobs: [makeJob({ project: 'zeta', kind: 'release', exitCode: 1, finishedAt: 6000 })],
+        nowSeconds: 10_000,
+      }),
+    )
+    const s = signals.find((x) => x.type === 'project_paused')
+    expect(s?.ageSeconds).toBe(4000)
+  })
+
+  it('leaves ageSeconds null when neither a pausedAt nor a countable failure is known', () => {
+    const signals = deriveInboxSignals(
+      baseInput({
+        tasks: [makeTask({ project: 'zeta', paused: true })],
+        pausedReasonByProject: { zeta: 'Circuit breaker: 3 failed runs in 60min' },
+      }),
+    )
+    expect(signals.find((x) => x.type === 'project_paused')?.ageSeconds).toBeNull()
+  })
+
   it('does not nag for a deliberate MANUAL pause (no recorded reason)', () => {
     const signals = deriveInboxSignals(
       baseInput({ tasks: [makeTask({ project: 'zeta', paused: true })] }),

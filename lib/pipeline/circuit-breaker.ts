@@ -9,6 +9,12 @@ import type { JobData } from '@/lib/jobs/types';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
 
+// Prefix every circuit-breaker pause reason carries. The single source of truth
+// shared with the auto-resume reconciler so it can tell a breaker pause apart
+// from a soak / push-hook pause (which must NOT auto-resume). Keep the trailing
+// space so `startsWith` can't false-match an unrelated reason.
+export const CIRCUIT_BREAKER_REASON_PREFIX = 'Circuit breaker: ';
+
 /**
  * Top-level run kinds the breaker counts. Pipeline sub-steps (review/fix/commit
  * /push) are excluded — a single release can fail several sub-steps, which
@@ -68,7 +74,7 @@ export async function maybeTripCircuitBreaker(job: JobData): Promise<boolean> {
     const { pauseProject } = await import('@/lib/pipeline/pause-project');
     const paused = await pauseProject(
       job.project,
-      `Circuit breaker: ${failures} failed runs in ${settings.project_failure_window_minutes}min (threshold ${threshold}). Fix the underlying failures, then resume.`,
+      `${CIRCUIT_BREAKER_REASON_PREFIX}${failures} failed runs in ${settings.project_failure_window_minutes}min (threshold ${threshold}). Fix the underlying failures, then resume.`,
     );
     if (!paused) return false;
     console.log(

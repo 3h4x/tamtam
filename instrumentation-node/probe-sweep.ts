@@ -158,6 +158,16 @@ export async function runProbeSweep(): Promise<void> {
   } catch (err) {
     console.error('[probe-sweep] unfruitful-pause error:', err);
   }
+  // Self-heal circuit-breaker pauses whose failures a later successful run
+  // proved resolved: resume the project so the stale `project_paused` HITL
+  // clears instead of nagging forever. Scoped to breaker pauses; re-trips on its
+  // own if failures resume. No-op when nothing is breaker-paused.
+  try {
+    const { runCircuitBreakerAutoResumeSweep } = await import('@/lib/pipeline/circuit-breaker-resume');
+    await runCircuitBreakerAutoResumeSweep();
+  } catch (err) {
+    console.error('[probe-sweep] circuit-breaker auto-resume error:', err);
+  }
   // Safety net: re-fire orphaned pending releases. A pending release normally
   // drains on a pipeline-lock-release event or at boot. If neither fires — the
   // holding pipeline emitted no release event, or the release was queued after

@@ -6,6 +6,7 @@ import { listAutomationQueue, type AutomationQueueItem } from '@/lib/workflows/a
 import { db, schema } from '@/lib/db';
 import { isAgentJobKind } from '@/lib/jobs/kinds';
 import { isCancelledExitCode } from '@/lib/shared/job-exit-codes';
+import { latestCountableFailureFinishedAt } from '@/lib/pipeline/circuit-breaker-resume';
 import { swrGet, type SwrStore } from '@/lib/shared/swr-cache';
 import type { Task } from '@/lib/shared/types';
 
@@ -136,6 +137,11 @@ export interface InboxInput {
    *  by project. Presence marks a system pause that must surface as a HITL;
    *  absence means either not paused or a deliberate manual pause (no nag). */
   pausedReasonByProject: Record<string, string>;
+  /** Epoch-second timestamp of when each project was auto-paused, keyed by
+   *  project — DATES the `project_paused` HITL so it can't read as stale "last
+   *  year's snow." Optional/absent for pauses that predate timestamp storage;
+   *  the derivation then falls back to the tripping failure's finish time. */
+  pausedAtByProject?: Record<string, number>;
   nowSeconds: number;
 }
 
@@ -238,7 +244,7 @@ function projectHref(project: string): string {
  * severity, oldest-first (most urgent). Exported for unit testing.
  */
 export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
-  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, pausedReasonByProject, nowSeconds } = input;
+  const { tasks, jobs, automationQueue, openPrByProject, openPrNumbersByProject, pausedReasonByProject, pausedAtByProject = {}, nowSeconds } = input;
   const signals: InboxSignal[] = [];
 
   for (const task of tasks) {
@@ -254,6 +260,10 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
     //    A deliberate MANUAL pause records no reason and does NOT nag here.
     const pausedReason = pausedReasonByProject[project];
     if (task.paused && pausedReason) {
+      // Date the pause so it can't read as stale "last year's snow": use the
+      // recorded pause timestamp, falling back to the tripping failure's finish
+      // time for pauses that predate timestamp storage.
+      const pausedAt = pausedAtByProject[project] ?? latestCountableFailureFinishedAt(jobs, project);
       // NB: when the same project has a pr_needs_manual_merge below, this paused
       // row is suppressed as redundant (merging that PR also resumes the project)
       // — see the dedup pass after the loop. It only stands alone when the pause
@@ -267,7 +277,7 @@ export function deriveInboxSignals(input: InboxInput): InboxSignal[] {
         detail: pausedReason,
         href: projectHref(project),
         externalUrl: null,
-        ageSeconds: null,
+        ageSeconds: pausedAt != null ? Math.max(0, Math.floor(nowSeconds - pausedAt)) : null,
         action: { kind: 'resume', label: 'Resume' },
       });
     }
@@ -833,8 +843,11 @@ async function computeInboxSignals(): Promise<InboxSignalsResult> {
   });
 
   const { byProject: openPrByProject, numbersByProject: openPrNumbersByProject } = await loadOpenPrs(tasks);
-  const { listPauseReasons } = await import('@/lib/pipeline/pause-project');
-  const pausedReasonByProject = await listPauseReasons().catch(() => ({}));
+  const { listPauseReasons, listPausedAt } = await import('@/lib/pipeline/pause-project');
+  const [pausedReasonByProject, pausedAtByProject] = await Promise.all([
+    listPauseReasons().catch(() => ({})),
+    listPausedAt().catch(() => ({})),
+  ]);
 
   const signals = deriveInboxSignals({
     tasks,
@@ -843,6 +856,7 @@ async function computeInboxSignals(): Promise<InboxSignalsResult> {
     openPrByProject,
     openPrNumbersByProject,
     pausedReasonByProject,
+    pausedAtByProject,
     nowSeconds: Date.now() / 1000,
   });
   return { signals, counts: countInboxSignals(signals) };
