@@ -8,6 +8,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    concurrency: release
     permissions:
       contents: write
       issues: write
@@ -19,21 +20,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version-file: ".nvmrc"
-
-      - name: Enable pnpm
-        run: corepack enable
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Semantic Release
+      # Zero-dependency replacement for semantic-release; reads .releaserc as is.
+      # No Node setup or pnpm install: the action needs neither.
+      - name: Release
         id: release
-        run: |
-          echo "Release Node runtime: $(node --version)"
-          pnpm exec semantic-release
+        uses: 3h4x/gha-semantic-tag-vanilla@79cc48684d2cacae369a4aace599b84bbf400984 # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
